@@ -40,7 +40,7 @@ public sealed class MainWindow : Window
 
     private readonly TabControl _tabStrip;
     private readonly TextBlock _status;
-    private readonly string? _bashRcFile;
+    private readonly ShellIntegration.LaunchSpec _shell = ShellIntegration.Resolve();
     private double _fontSize = 13;
     private int _paneCounter;
 
@@ -83,8 +83,6 @@ public sealed class MainWindow : Window
         Width = 1200;
         Height = 800;
         Background = new SolidColorBrush(Color.Parse("#1e1e2e"));
-
-        _bashRcFile = TryWriteBashIntegrationRcFile();
 
         _tabStrip = new TabControl
         {
@@ -234,6 +232,7 @@ public sealed class MainWindow : Window
         Console.WriteLine($"SELFTEST phase={phase}");
         Console.WriteLine($"SELFTEST ghostty={RoyalTerminal.Terminal.GhosttyVtProcessor.IsAvailable()}");
         Console.WriteLine($"SELFTEST gpu_gl={IsGpuCompositing()}");
+        Console.WriteLine($"SELFTEST shell={_shell.ShellName} integrated={_shell.Integrated}");
         Console.WriteLine($"SELFTEST tabs={_tabs.Count}");
         for (int i = 0; i < _tabs.Count; i++)
         {
@@ -456,18 +455,24 @@ public sealed class MainWindow : Window
 
     private async Task StartSessionAsync(TerminalControl terminal, string? workingDirectory)
     {
-        TerminalCommandSpec? command = null;
-        if (_bashRcFile is not null)
+        Dictionary<string, string> environment = new()
         {
-            command = new TerminalCommandSpec("/bin/bash", ["--rcfile", _bashRcFile]);
+            ["TERM_PROGRAM"] = "spike-royalterminal",
+        };
+        if (_shell.Environment is not null)
+        {
+            foreach ((string key, string value) in _shell.Environment)
+            {
+                environment[key] = value;
+            }
         }
 
         PtyTransportOptions options = new(
-            Command: command,
+            Command: _shell.Command,
             WorkingDirectory: Directory.Exists(workingDirectory)
                 ? workingDirectory
                 : Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            Environment: new Dictionary<string, string> { ["TERM_PROGRAM"] = "spike-royalterminal" },
+            Environment: environment,
             Dimensions: new TerminalSessionDimensions(120, 30, 1200, 700));
 
         await terminal.StartSessionAsync(options);
@@ -1140,7 +1145,8 @@ public sealed class MainWindow : Window
             ? node.WorkingDirectory ?? "~"
             : "~";
         int panes = tab.Nodes.Count;
-        _status.Text = $"{ghostty}  |  {panes} pane(s)  |  {cwd}  |  layout -> {WorkspacePath}";
+        string integrated = _shell.Integrated ? $"{_shell.ShellName}+osc7" : _shell.ShellName;
+        _status.Text = $"{ghostty}  |  {integrated}  |  {panes} pane(s)  |  {cwd}  |  layout -> {WorkspacePath}";
     }
 
     private static string NormalizeCwd(string cwd)
@@ -1148,7 +1154,16 @@ public sealed class MainWindow : Window
         if (cwd.StartsWith("file://", StringComparison.OrdinalIgnoreCase)
             && Uri.TryCreate(cwd, UriKind.Absolute, out Uri? uri))
         {
-            return uri.LocalPath;
+            cwd = uri.LocalPath;
+        }
+
+        // pwsh's OSC 7 can yield a doubled leading slash via Uri.LocalPath.
+        if (!OperatingSystem.IsWindows())
+        {
+            while (cwd.StartsWith("//", StringComparison.Ordinal))
+            {
+                cwd = cwd[1..];
+            }
         }
 
         return cwd;
@@ -1172,49 +1187,5 @@ public sealed class MainWindow : Window
 
         string name = Path.GetFileName(Path.TrimEndingDirectorySeparator(cwd));
         return string.IsNullOrEmpty(name) ? cwd : name;
-    }
-
-    /// <summary>
-    /// Writes a bash rcfile that sources the user's ~/.bashrc and then the
-    /// RoyalTerminal shell-integration snippet (OSC 7 cwd + OSC 133 prompts),
-    /// so panes report their working directory for layout save/restore.
-    /// </summary>
-    private static string? TryWriteBashIntegrationRcFile()
-    {
-        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
-        {
-            return null;
-        }
-
-        if (!File.Exists("/bin/bash"))
-        {
-            return null;
-        }
-
-        try
-        {
-            string? script = TerminalShellIntegrationBootstrapBuilder.Build(
-                new TerminalShellIntegrationBootstrapOptions(TerminalShellIntegrationBootstrapShell.Bash));
-            if (script is null)
-            {
-                return null;
-            }
-
-            string path = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                "spike-royalterminal",
-                "bashrc");
-            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            File.WriteAllText(
-                path,
-                "[ -f /etc/bash.bashrc ] && source /etc/bash.bashrc\n" +
-                "[ -f \"$HOME/.bashrc\" ] && source \"$HOME/.bashrc\"\n\n" +
-                script + "\n");
-            return path;
-        }
-        catch
-        {
-            return null;
-        }
     }
 }
