@@ -28,6 +28,8 @@ namespace SpikeRoyalTerminal;
 ///   Ctrl+Shift+F        find (Enter next, Shift+Enter prev, Esc close)
 ///   Ctrl+Shift+K        clear scrollback
 ///   Ctrl+Shift+N        new window
+///   Ctrl+Shift+P        configure pane (start folder, program, args)
+///   Ctrl+Shift+R        restart pane
 ///   Ctrl+PgUp/PgDn      previous / next tab
 ///   Ctrl+Shift+PgUp/PgDn move tab left / right
 ///   Ctrl+= / Ctrl+-     font size
@@ -36,8 +38,8 @@ public sealed class MainWindow : Window
 {
     private static readonly string WorkspacePath = NamedLayouts.ActivePath;
 
-    private readonly ITerminalWorkspaceStore _workspaceStore =
-        TerminalWorkspaceStoreFactory.CreateDefault(WorkspacePath);
+    /// <summary>Per-pane startup config keyed by pane id (shared by all windows).</summary>
+    private static readonly Dictionary<string, PaneStartup> Startups = new(StringComparer.Ordinal);
 
     private readonly TabControl _tabStrip;
     private readonly TextBlock _status;
@@ -175,9 +177,17 @@ public sealed class MainWindow : Window
             try
             {
                 await RestoreWorkspaceAsync();
-                if (_isPrimary && Environment.GetCommandLineArgs().Contains("--selftest"))
+                if (_isPrimary && Environment.GetCommandLineArgs().Contains("--dump-panes"))
+                {
+                    await DumpPanesAsync();
+                }
+                else if (_isPrimary && Environment.GetCommandLineArgs().Contains("--selftest"))
                 {
                     await RunSelfTestAsync();
+                }
+                else if (_isPrimary && Environment.GetCommandLineArgs().Contains("--configure-pane"))
+                {
+                    await ConfigurePaneAsync();
                 }
             }
             catch (Exception ex)
@@ -320,6 +330,15 @@ public sealed class MainWindow : Window
         pane.Items.Add(new Separator());
         pane.Items.Add(Item("Zoom Pane", Gesture(Key.Z), ToggleZoom));
         pane.Items.Add(Item("Equalize Splits", Gesture(Key.OemPlus), EqualizeSplits));
+        pane.Items.Add(new Separator());
+        pane.Items.Add(Item("Configure Pane…", Gesture(Key.P), () => _ = ConfigurePaneAsync()));
+        pane.Items.Add(Item("Restart Pane", Gesture(Key.R), () =>
+        {
+            if (ActiveTab()?.Active is { } control)
+            {
+                _ = RestartPaneAsync(control);
+            }
+        }));
 
         MenuItem edit = new() { Header = "Edit" };
         edit.Items.Add(Item("Copy", Gesture(Key.C), () =>
@@ -613,6 +632,41 @@ public sealed class MainWindow : Window
         Close();
     }
 
+    /// <summary>
+    /// Diagnostic: restores the layout as normal, waits for programs to run,
+    /// prints each pane's id, startup, cwd and last screen lines, then exits
+    /// WITHOUT saving (so the layout file under test is left untouched).
+    /// </summary>
+    private async Task DumpPanesAsync()
+    {
+        await Task.Delay(3000);
+        foreach (MainWindow window in Windows.ToArray())
+        {
+            foreach (Tab tab in window._tabs)
+            {
+                foreach ((TerminalControl control, TerminalPaneNode node) in tab.Nodes)
+                {
+                    string startup = StartupFor(node) is { } s
+                        ? $"dir={s.Directory ?? "-"} cmd={s.Command ?? "-"} args=[{string.Join("|", s.Args)}] inShell={s.RunInShell}"
+                        : "(none)";
+                    string text = TryReadScreenText(control, out string screen) ? screen : string.Empty;
+                    string tail = string.Join(" / ", text
+                        .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                        .TakeLast(4));
+                    Console.WriteLine($"PANE {node.Id} startup: {startup}");
+                    Console.WriteLine($"PANE {node.Id} cwd={node.WorkingDirectory ?? "?"} alive={control.HasActiveSession}");
+                    Console.WriteLine($"PANE {node.Id} screen: {tail}");
+                }
+            }
+        }
+
+        _shuttingDown = true;
+        foreach (MainWindow window in Windows.ToArray())
+        {
+            window.Close();
+        }
+    }
+
     private static bool TryReadScreenText(TerminalControl control, out string text)
     {
         text = string.Empty;
@@ -696,6 +750,8 @@ public sealed class MainWindow : Window
         else if (ctrlShift && e.Key == Key.O) { _ = SplitAsync(TerminalPaneSplitOrientation.Horizontal); e.Handled = true; }
         else if (ctrlShift && e.Key == Key.E) { _ = SplitAsync(TerminalPaneSplitOrientation.Vertical); e.Handled = true; }
         else if (ctrlShift && e.Key == Key.Z) { ToggleZoom(); e.Handled = true; }
+        else if (ctrlShift && e.Key == Key.P) { _ = ConfigurePaneAsync(); e.Handled = true; }
+        else if (ctrlShift && e.Key == Key.R && ActiveTab()?.Active is { } restartTarget) { _ = RestartPaneAsync(restartTarget); e.Handled = true; }
         else if (ctrlShift && e.Key == Key.C && ActiveTab()?.Active is { HasSelection: true } sel) { _ = sel.CopySelectionAsync(); e.Handled = true; }
         else if (ctrlShift && e.Key == Key.V && ActiveTab()?.Active is { } pasteTarget) { _ = pasteTarget.PasteAsync(); e.Handled = true; }
         else if (ctrlShift && e.Key == Key.F) { OpenSearch(); e.Handled = true; }
@@ -814,14 +870,36 @@ public sealed class MainWindow : Window
             }
         };
 
-        terminal.ProcessExited += (_, _) => Dispatcher.UIThread.Post(() => ClosePane(terminal));
+        terminal.ProcessExited += (_, exitCode) => Dispatcher.UIThread.Post(() => OnPaneProcessExited(terminal, exitCode));
         return terminal;
+    }
+
+    /// <summary>
+    /// Shell panes close when the shell exits (as before). Exec-mode panes
+    /// (a program run directly, no shell) stay open with a notice so the
+    /// output can be read; Ctrl+Shift+R restarts the program.
+    /// </summary>
+    private void OnPaneProcessExited(TerminalControl terminal, int exitCode)
+    {
+        if (FindTab(terminal) is { } tab
+            && tab.Nodes.TryGetValue(terminal, out TerminalPaneNode? node)
+            && Startups.TryGetValue(node.Id, out PaneStartup? startup)
+            && startup.IsExec)
+        {
+            terminal.WriteOutput(System.Text.Encoding.UTF8.GetBytes(
+                $"\r\n\x1b[0m\x1b[2m[{startup.Command} exited with code {exitCode}. "
+                + "Ctrl+Shift+R to restart, Ctrl+Shift+W to close]\x1b[0m\r\n"));
+            return;
+        }
+
+        ClosePane(terminal);
     }
 
     private async Task StartSessionAsync(
         TerminalControl terminal,
         string? workingDirectory,
-        bool preserveScrollback = false)
+        bool preserveScrollback = false,
+        PaneStartup? startup = null)
     {
         Dictionary<string, string> environment = new()
         {
@@ -835,15 +913,48 @@ public sealed class MainWindow : Window
             }
         }
 
+        // Configured directory wins over the last-seen cwd.
+        string? directory = startup?.ResolveDirectory()
+            ?? (Directory.Exists(workingDirectory) ? workingDirectory : null)
+            ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+
+        TerminalCommandSpec? command = startup is { IsExec: true }
+            ? new TerminalCommandSpec(startup.Command!.Trim(), startup.Args)
+            : _shell.Command;
+
         PtyTransportOptions options = new(
-            Command: _shell.Command,
-            WorkingDirectory: Directory.Exists(workingDirectory)
-                ? workingDirectory
-                : Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            Command: command,
+            WorkingDirectory: directory,
             Environment: environment,
             Dimensions: new TerminalSessionDimensions(120, 30, 1200, 700));
 
         await terminal.StartSessionAsync(options, preserveScrollback);
+
+        // Shell mode: type the configured program into the fresh shell.
+        if (startup is { HasCommand: true, RunInShell: true })
+        {
+            terminal.SendInput(startup.BuildShellLine(_shell.ShellName) + "\r");
+        }
+    }
+
+    private PaneStartup? StartupFor(TerminalPaneNode node) =>
+        Startups.TryGetValue(node.Id, out PaneStartup? startup) && !startup.IsEmpty ? startup : null;
+
+    /// <summary>Stops the pane's process and starts it again from its startup config.</summary>
+    private async Task RestartPaneAsync(TerminalControl terminal)
+    {
+        if (FindTab(terminal) is not { } tab || !tab.Nodes.TryGetValue(terminal, out TerminalPaneNode? node))
+        {
+            return;
+        }
+
+        if (terminal.HasActiveSession)
+        {
+            terminal.StopPty();
+        }
+
+        await StartSessionAsync(terminal, node.WorkingDirectory, preserveScrollback: true, StartupFor(node));
+        terminal.Focus();
     }
 
     private TerminalPaneNode CreateLeaf(TerminalControl terminal, string? cwd, string? id = null)
@@ -866,8 +977,77 @@ public sealed class MainWindow : Window
             BorderThickness = new Thickness(1),
             BorderBrush = Brushes.Transparent,
         };
+        paneBorder.ContextMenu = BuildPaneContextMenu(terminal);
         node.SetLeaf(terminal, paneBorder);
         return node;
+    }
+
+    private ContextMenu BuildPaneContextMenu(TerminalControl terminal)
+    {
+        MenuItem configure = new() { Header = "Configure Pane…" };
+        configure.Click += (_, _) => { terminal.Focus(); _ = ConfigurePaneAsync(); };
+        MenuItem restart = new() { Header = "Restart Pane" };
+        restart.Click += (_, _) => _ = RestartPaneAsync(terminal);
+        MenuItem right = new() { Header = "Split Right" };
+        right.Click += (_, _) => { terminal.Focus(); _ = SplitAsync(TerminalPaneSplitOrientation.Horizontal); };
+        MenuItem down = new() { Header = "Split Down" };
+        down.Click += (_, _) => { terminal.Focus(); _ = SplitAsync(TerminalPaneSplitOrientation.Vertical); };
+        MenuItem close = new() { Header = "Close Pane" };
+        close.Click += (_, _) => ClosePane(terminal);
+
+        ContextMenu menu = new();
+        menu.Items.Add(configure);
+        menu.Items.Add(restart);
+        menu.Items.Add(new Separator());
+        menu.Items.Add(right);
+        menu.Items.Add(down);
+        menu.Items.Add(new Separator());
+        menu.Items.Add(close);
+        return menu;
+    }
+
+    /// <summary>Opens the startup editor for the active pane and applies the result.</summary>
+    private async Task ConfigurePaneAsync()
+    {
+        if (ActiveTab() is not { Active: TerminalControl terminal } tab
+            || !tab.Nodes.TryGetValue(terminal, out TerminalPaneNode? node))
+        {
+            return;
+        }
+
+        PaneStartup current = Startups.TryGetValue(node.Id, out PaneStartup? existing)
+            ? existing.Clone()
+            : new PaneStartup();
+
+        PaneStartupDialog dialog = new(current, node.WorkingDirectory ?? "~", _shell.ShellName, Background);
+        PaneStartup? edited = await dialog.ShowDialog(this);
+        if (edited is null)
+        {
+            terminal.Focus();
+            return;
+        }
+
+        if (edited.IsEmpty)
+        {
+            Startups.Remove(node.Id);
+        }
+        else
+        {
+            Startups[node.Id] = edited;
+        }
+
+        MarkLayoutDirty();
+        SaveWorkspace();
+        UpdateStatus(tab);
+
+        if (dialog.ApplyNow)
+        {
+            await RestartPaneAsync(terminal);
+        }
+        else
+        {
+            terminal.Focus();
+        }
     }
 
     // ----- tabs ------------------------------------------------------------
@@ -1347,7 +1527,7 @@ public sealed class MainWindow : Window
                 Windows = Windows.Select(w => w.ToWorkspaceWindow()).ToList(),
             };
 
-            _workspaceStore.SaveAsync(document).AsTask().GetAwaiter().GetResult();
+            LayoutFile.Save(WorkspacePath, document, LiveStartups());
 
             if (Config.RestoreScrollback)
             {
@@ -1368,6 +1548,21 @@ public sealed class MainWindow : Window
     }
 
     private string WindowId() => $"window-{Windows.IndexOf(this) + 1}";
+
+    /// <summary>Startup entries for panes that currently exist (drops closed panes).</summary>
+    private static Dictionary<string, PaneStartup> LiveStartups()
+    {
+        Dictionary<string, PaneStartup> live = new(StringComparer.Ordinal);
+        foreach (TerminalPaneNode node in Windows.SelectMany(w => w._tabs).SelectMany(t => t.Nodes.Values))
+        {
+            if (Startups.TryGetValue(node.Id, out PaneStartup? startup) && !startup.IsEmpty)
+            {
+                live[node.Id] = startup;
+            }
+        }
+
+        return live;
+    }
 
     private TerminalWorkspaceWindow ToWorkspaceWindow() => new()
     {
@@ -1470,7 +1665,11 @@ public sealed class MainWindow : Window
             TerminalWorkspaceDocument document;
             try
             {
-                document = await _workspaceStore.LoadAsync();
+                (document, Dictionary<string, PaneStartup> loaded) = LayoutFile.Load(WorkspacePath);
+                foreach ((string id, PaneStartup startup) in loaded)
+                {
+                    Startups[id] = startup;
+                }
             }
             catch (Exception ex)
             {
@@ -1568,7 +1767,11 @@ public sealed class MainWindow : Window
                 _scrollbackRestored++;
             }
 
-            sessions.Add(StartSessionAsync(terminal, saved.WorkingDirectory, preserveScrollback: replayed));
+            sessions.Add(StartSessionAsync(
+                terminal,
+                saved.WorkingDirectory,
+                preserveScrollback: replayed,
+                startup: StartupFor(leaf)));
             return leaf;
         }
 
@@ -1636,7 +1839,11 @@ public sealed class MainWindow : Window
             : "~";
         int panes = tab.Nodes.Count;
         string integrated = _shell.Integrated ? $"{_shell.ShellName}+osc7" : _shell.ShellName;
-        _status.Text = $"{ghostty}  |  {integrated}  |  {panes} pane(s)  |  {cwd}  |  layout -> {WorkspacePath}";
+        string program = tab.Active is { } ac && tab.Nodes.TryGetValue(ac, out TerminalPaneNode? an)
+            && StartupFor(an) is { HasCommand: true } su
+                ? $"  |  runs: {su.Command} {string.Join(' ', su.Args)}".TrimEnd()
+                : string.Empty;
+        _status.Text = $"{ghostty}  |  {integrated}  |  {panes} pane(s)  |  {cwd}{program}  |  layout -> {WorkspacePath}";
     }
 
     private static string NormalizeCwd(string cwd)
