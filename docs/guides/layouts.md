@@ -34,7 +34,8 @@ as you left it.
   per-pane startup configuration to `layouts/NAME.json`
 - **Open Saved Layout** loads a saved layout back in as a new, running
   layout in the current window
-- **Delete Saved Layout** removes a `layouts/NAME.json` file
+- **Delete Saved Layout** removes a `layouts/NAME.json` file after asking
+  for confirmation (there's no undo)
 
 Saved layouts are independent snapshots: editing (and resaving) one does
 not affect any layout already open from it, and vice versa.

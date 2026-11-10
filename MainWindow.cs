@@ -397,7 +397,16 @@ public sealed class MainWindow : Window
         view.Items.Add(about);
 
         MenuItem layouts = new() { Header = "Layouts" };
-        layouts.SubmenuOpened += (_, _) => RebuildLayoutsMenu(layouts);
+        layouts.SubmenuOpened += (_, e) =>
+        {
+            // SubmenuOpened bubbles: opening "Open Saved Layout" also raises it
+            // here. Rebuilding then would replace the submenu the user is
+            // pointing at with fresh, detached items, so clicks did nothing.
+            if (ReferenceEquals(e.Source, layouts))
+            {
+                RebuildLayoutsMenu(layouts);
+            }
+        };
         RebuildLayoutsMenu(layouts);
 
         Menu menu = new() { FontSize = 12 };
@@ -507,12 +516,73 @@ public sealed class MainWindow : Window
             open.Items.Add(o);
 
             MenuItem d = new() { Header = name };
-            d.Click += (_, _) => NamedLayouts.Delete(name);
+            d.Click += async (_, _) => await DeleteSavedLayoutAsync(name);
             delete.Items.Add(d);
         }
 
         layouts.Items.Add(open);
         layouts.Items.Add(delete);
+    }
+
+    /// <summary>
+    /// Selftest helper: opens Layouts, then a saved-layout submenu, the way a
+    /// mouse does (IsSubMenuOpen raises the real SubmenuOpened events), then
+    /// clicks the entry for <paramref name="name"/>.
+    /// </summary>
+    private async Task<(bool Opened, bool Deleted)> DriveSavedLayoutMenuAsync(string name)
+    {
+        MenuItem? Layouts() => _menu?.Items.OfType<MenuItem>().FirstOrDefault(m => (string?)m.Header == "Layouts");
+
+        async Task<MenuItem?> OpenSubmenuEntryAsync(string submenu)
+        {
+            if (Layouts() is not { } layouts)
+            {
+                return null;
+            }
+
+            layouts.IsSubMenuOpen = true;
+            await Task.Delay(150);
+            MenuItem? parent = layouts.Items.OfType<MenuItem>().FirstOrDefault(m => (string?)m.Header == submenu);
+            if (parent is null)
+            {
+                return null;
+            }
+
+            parent.IsSubMenuOpen = true;
+            await Task.Delay(150);
+
+            // The entry must still belong to the menu that is on screen.
+            bool parentStillShown = layouts.Items.Contains(parent) && parent.IsSubMenuOpen;
+            MenuItem? entry = parent.Items.OfType<MenuItem>().FirstOrDefault(m => (string?)m.Header == name);
+            return parentStillShown ? entry : null;
+        }
+
+        int before = _tabs.Count;
+        bool opened = false;
+        if (await OpenSubmenuEntryAsync("Open Saved Layout") is { } openEntry)
+        {
+            openEntry.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            await Task.Delay(1500);
+            opened = _tabs.Count == before + 1;
+            if (opened)
+            {
+                CloseTab(_tabs[^1]);
+            }
+        }
+
+        Layouts()?.Close();
+        bool deleted = false;
+        if (await OpenSubmenuEntryAsync("Delete Saved Layout") is { } deleteEntry)
+        {
+            _skipDeleteConfirm = true;
+            deleteEntry.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            await Task.Delay(300);
+            _skipDeleteConfirm = false;
+            deleted = !NamedLayouts.List().Contains(name);
+        }
+
+        Layouts()?.Close();
+        return (opened, deleted);
     }
 
     private async Task RenameActiveLayoutAsync()
@@ -659,6 +729,68 @@ public sealed class MainWindow : Window
                 }
                 : null,
         };
+    }
+
+    /// <summary>Set by the selftest so menu-driven deletes skip the confirm dialog.</summary>
+    private bool _skipDeleteConfirm;
+
+    /// <summary>Deletes layouts/NAME.json after a confirm (no undo).</summary>
+    private async Task DeleteSavedLayoutAsync(string name)
+    {
+        if (!_skipDeleteConfirm && !await ConfirmAsync(
+                "Delete Saved Layout",
+                $"Delete saved layout \"{name}\"?\nThis removes {NamedLayouts.PathFor(name)} and can't be undone.",
+                "Delete"))
+        {
+            ActiveTab()?.Active?.Focus();
+            return;
+        }
+
+        try
+        {
+            NamedLayouts.Delete(name);
+            _status.Text = $"deleted saved layout \"{name}\"";
+        }
+        catch (Exception ex)
+        {
+            _status.Text = $"couldn't delete \"{name}\": {ex.Message}";
+        }
+
+        ActiveTab()?.Active?.Focus();
+    }
+
+    private async Task<bool> ConfirmAsync(string title, string message, string okText)
+    {
+        Button ok = new() { Content = okText, IsDefault = true, MinWidth = 80 };
+        Button cancel = new() { Content = "Cancel", IsCancel = true, MinWidth = 80, Margin = new Thickness(8, 0, 0, 0) };
+        StackPanel buttons = new() { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
+        buttons.Children.Add(ok);
+        buttons.Children.Add(cancel);
+        StackPanel body = new() { Margin = new Thickness(16), Spacing = 12 };
+        body.Children.Add(new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap, MaxWidth = 420 });
+        body.Children.Add(buttons);
+
+        Window dialog = new()
+        {
+            Title = title,
+            Content = body,
+            SizeToContent = SizeToContent.WidthAndHeight,
+            CanResize = false,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Background = Background,
+        };
+
+        bool result = false;
+        ok.Click += (_, _) =>
+        {
+            result = true;
+            dialog.Close();
+        };
+        cancel.Click += (_, _) => dialog.Close();
+        dialog.Opened += (_, _) => cancel.Focus();
+
+        await dialog.ShowDialog(this);
+        return result;
     }
 
     private async Task<string?> PromptForNameAsync(string title, string initial, string okText)
@@ -960,6 +1092,12 @@ public sealed class MainWindow : Window
             {
                 CloseTab(opened);
             }
+
+            // Same again through the real menu: open Layouts, open the
+            // "Open Saved Layout" submenu, click the entry. Then delete it via
+            // "Delete Saved Layout" the same way.
+            (bool menuOpened, bool menuDeleted) = await DriveSavedLayoutMenuAsync(probe);
+            Console.WriteLine($"SELFTEST menu_open_saved={menuOpened} menu_delete_saved={menuDeleted}");
 
             Startups.Remove(firstPaneId);
             NamedLayouts.Delete(probe);

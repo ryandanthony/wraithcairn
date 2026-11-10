@@ -39,6 +39,7 @@ jobs:
           echo "$OUTPUT" | grep -q "SELFTEST header_running=True idle_after=True"
           echo "$OUTPUT" | grep -q "SELFTEST pane_swap=True alive=True"
           echo "$OUTPUT" | grep -q "SELFTEST header_drag_swap=True order_restored=True"
+          echo "$OUTPUT" | grep -q "SELFTEST menu_open_saved=True menu_delete_saved=True"
 
       - name: Selftest (headless, run 2 - restore)
         if: matrix.os == 'ubuntu-latest'
