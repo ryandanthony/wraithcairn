@@ -18,8 +18,8 @@ namespace SpikeRoyalTerminal;
 /// per-pane cwd) to workspace.json and restores it on next start.
 ///
 /// Keys:
-///   Ctrl+Shift+T        new tab (or click +)
-///   Ctrl+Shift+W        close pane (last pane closes the tab)
+///   Ctrl+Shift+T        new layout
+///   Ctrl+Shift+W        close pane (last pane closes the layout)
 ///   Ctrl+Shift+O        split right          Ctrl+Shift+E  split down
 ///   Alt+Arrows          move focus between panes
 ///   Ctrl+Alt+Arrows     resize split          Ctrl+Shift+Z  zoom pane
@@ -30,8 +30,9 @@ namespace SpikeRoyalTerminal;
 ///   Ctrl+Shift+N        new window
 ///   Ctrl+Shift+P        configure pane (start folder, program, args)
 ///   Ctrl+Shift+R        restart pane
-///   Ctrl+PgUp/PgDn      previous / next tab
-///   Ctrl+Shift+PgUp/PgDn move tab left / right
+///   Ctrl+PgUp/PgDn      previous / next layout
+///   Alt+1..9            switch to layout N
+///   Ctrl+Shift+PgUp/PgDn move layout up / down in the list
 ///   Ctrl+= / Ctrl+-     font size
 /// </summary>
 public sealed class MainWindow : Window
@@ -41,7 +42,7 @@ public sealed class MainWindow : Window
     /// <summary>Per-pane startup config keyed by pane id (shared by all windows).</summary>
     private static readonly Dictionary<string, PaneStartup> Startups = new(StringComparer.Ordinal);
 
-    private readonly TabControl _tabStrip;
+    private readonly ContentControl _layoutHost;
     private readonly TextBlock _status;
     private readonly TextBox _searchBox;
     private readonly Border _searchBar;
@@ -51,13 +52,20 @@ public sealed class MainWindow : Window
     private double _fontSize = Config.FontSize;
     private static int _paneCounter;
 
+    /// <summary>
+    /// A layout: one named pane tree. Several can be open in a window; only
+    /// the active one is shown, the others keep running in the background.
+    /// Switched from the Layouts menu (no tab strip).
+    /// </summary>
     private sealed class Tab
     {
-        public required TabItem Item { get; init; }
-        public required TextBlock Header { get; init; }
+        public required string Name { get; set; }
         public required Border Host { get; init; }
         public required TerminalPaneNode Root { get; set; }
         public TerminalControl? Active { get; set; }
+
+        /// <summary>Program-set (OSC) or cwd-derived title, shown in the window title.</summary>
+        public string? DisplayTitle { get; set; }
 
         /// <summary>True once the program set a title via OSC; stops cwd-based titles.</summary>
         public bool TitleFromOsc { get; set; }
@@ -78,7 +86,7 @@ public sealed class MainWindow : Window
     }
 
     private readonly List<Tab> _tabs = [];
-    private readonly TabItem _plusTab;
+    private Tab? _activeTab;
     private readonly DispatcherTimer _autosave;
     private System.Runtime.InteropServices.PosixSignalRegistration? _sigterm;
     private bool _layoutDirty;
@@ -115,24 +123,10 @@ public sealed class MainWindow : Window
             ? new SolidColorBrush(Color.FromUInt32(chromeTheme.DefaultBackground))
             : new SolidColorBrush(Color.Parse("#1e1e2e"));
 
-        _tabStrip = new TabControl
+        _layoutHost = new ContentControl
         {
-            Padding = new Thickness(0),
-        };
-
-        // Trailing pseudo-tab that acts as a "new tab" button.
-        _plusTab = new TabItem
-        {
-            Header = new TextBlock { Text = "+", FontSize = 14, Margin = new Thickness(4, 0) },
-            Content = new Border(),
-        };
-        _tabStrip.Items.Add(_plusTab);
-        _tabStrip.SelectionChanged += (_, _) =>
-        {
-            if (!_restoring && ReferenceEquals(_tabStrip.SelectedItem, _plusTab) && _tabs.Count > 0)
-            {
-                _ = NewTabAsync(null);
-            }
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            VerticalContentAlignment = VerticalAlignment.Stretch,
         };
 
         _status = new TextBlock
@@ -166,7 +160,7 @@ public sealed class MainWindow : Window
         root.Children.Add(menu);
         root.Children.Add(_status);
         root.Children.Add(_searchBar);
-        root.Children.Add(_tabStrip);
+        root.Children.Add(_layoutHost);
         Content = root;
 
         // Intercept our shortcuts before the terminal control eats the keys.
@@ -317,7 +311,7 @@ public sealed class MainWindow : Window
             new(key, modifiers);
 
         MenuItem shell = new() { Header = "Shell" };
-        shell.Items.Add(Item("New Tab", Gesture(Key.T), () => _ = NewTabAsync(null)));
+        shell.Items.Add(Item("New Layout", Gesture(Key.T), () => _ = NewTabAsync(null)));
         shell.Items.Add(Item("New Window", Gesture(Key.N), () => new MainWindow(null, isPrimary: false).Show()));
         shell.Items.Add(new Separator());
         shell.Items.Add(Item("Close Pane", Gesture(Key.W), () => ClosePane()));
@@ -390,56 +384,250 @@ public sealed class MainWindow : Window
         return menu;
     }
 
-    // ----- named layouts ---------------------------------------------------
+    // ----- layouts menu ---------------------------------------------------
 
+    /// <summary>
+    /// Layouts menu, rebuilt each time it opens:
+    ///   [switch]  one entry per open layout (current one checked)
+    ///   New Layout / Rename / Close
+    ///   Save Layout As / Open Saved Layout / Delete Saved
+    /// </summary>
     private void RebuildLayoutsMenu(MenuItem layouts)
     {
         layouts.Items.Clear();
 
+        static KeyGesture Gesture(Key key, KeyModifiers modifiers = KeyModifiers.Control | KeyModifiers.Shift) =>
+            new(key, modifiers);
+
+        // Switch between open layouts.
+        for (int i = 0; i < _tabs.Count; i++)
+        {
+            Tab tab = _tabs[i];
+            bool current = ReferenceEquals(tab, _activeTab);
+            int panes = tab.Nodes.Count;
+            MenuItem item = new()
+            {
+                Header = $"{tab.Name}   ({panes} pane{(panes == 1 ? "" : "s")})",
+                ToggleType = MenuItemToggleType.Radio,
+                IsChecked = current,
+                InputGesture = i < 9 ? new KeyGesture(Key.D1 + i, KeyModifiers.Alt) : null,
+            };
+            item.Click += (_, _) => SwitchToLayout(tab);
+            layouts.Items.Add(item);
+        }
+
+        layouts.Items.Add(new Separator());
+
+        MenuItem next = new() { Header = "Next Layout", InputGesture = new KeyGesture(Key.PageDown, KeyModifiers.Control) };
+        next.Click += (_, _) => CycleTab(1);
+        next.IsEnabled = _tabs.Count > 1;
+        MenuItem prev = new() { Header = "Previous Layout", InputGesture = new KeyGesture(Key.PageUp, KeyModifiers.Control) };
+        prev.Click += (_, _) => CycleTab(-1);
+        prev.IsEnabled = _tabs.Count > 1;
+        layouts.Items.Add(next);
+        layouts.Items.Add(prev);
+        layouts.Items.Add(new Separator());
+
+        MenuItem newLayout = new() { Header = "New Layout…", InputGesture = Gesture(Key.T) };
+        newLayout.Click += async (_, _) =>
+        {
+            string? name = await PromptForNameAsync("New Layout", UniqueLayoutName("layout"), "Create");
+            if (name is not null)
+            {
+                await NewTabAsync(null, UniqueLayoutName(name));
+            }
+        };
+        layouts.Items.Add(newLayout);
+
+        MenuItem rename = new() { Header = "Rename Layout…", IsEnabled = _activeTab is not null };
+        rename.Click += async (_, _) => await RenameActiveLayoutAsync();
+        layouts.Items.Add(rename);
+
+        MenuItem close = new() { Header = "Close Layout", IsEnabled = _activeTab is not null };
+        close.Click += (_, _) =>
+        {
+            if (_activeTab is { } t)
+            {
+                CloseTab(t);
+            }
+        };
+        layouts.Items.Add(close);
+
+        layouts.Items.Add(new Separator());
+
+        // Saved (named) layouts on disk.
         MenuItem saveAs = new() { Header = "Save Layout As…" };
-        saveAs.Click += async (_, _) => await PromptSaveLayoutAsync();
+        saveAs.Click += async (_, _) => await SaveActiveLayoutAsAsync();
         layouts.Items.Add(saveAs);
 
         IReadOnlyList<string> names = NamedLayouts.List();
-        layouts.Items.Add(new Separator());
-
-        if (names.Count == 0)
-        {
-            layouts.Items.Add(new MenuItem { Header = "(no saved layouts)", IsEnabled = false });
-        }
-
+        MenuItem open = new() { Header = "Open Saved Layout", IsEnabled = names.Count > 0 };
+        MenuItem delete = new() { Header = "Delete Saved Layout", IsEnabled = names.Count > 0 };
         foreach (string name in names)
         {
-            bool isActive = string.Equals(name, NamedLayouts.ActiveName, StringComparison.Ordinal);
-            MenuItem open = new() { Header = isActive ? $"{name}  (this window)" : $"Open \"{name}\"" };
-            open.IsEnabled = !isActive;
-            open.Click += (_, _) =>
-            {
-                SaveWorkspace(); // make sure the current layout is on disk first
-                NamedLayouts.Launch(name);
-            };
-            layouts.Items.Add(open);
+            MenuItem o = new() { Header = name };
+            o.Click += async (_, _) => await OpenSavedLayoutAsync(name);
+            open.Items.Add(o);
+
+            MenuItem d = new() { Header = name };
+            d.Click += (_, _) => NamedLayouts.Delete(name);
+            delete.Items.Add(d);
         }
 
-        if (names.Count > 0)
-        {
-            layouts.Items.Add(new Separator());
-            MenuItem delete = new() { Header = "Delete" };
-            foreach (string name in names)
-            {
-                MenuItem del = new() { Header = name };
-                del.Click += (_, _) => NamedLayouts.Delete(name);
-                delete.Items.Add(del);
-            }
-
-            layouts.Items.Add(delete);
-        }
+        layouts.Items.Add(open);
+        layouts.Items.Add(delete);
     }
 
-    private async Task PromptSaveLayoutAsync()
+    private async Task RenameActiveLayoutAsync()
     {
-        TextBox nameBox = new() { Watermark = "layout name", Width = 260 };
-        Button ok = new() { Content = "Save", IsDefault = true, Margin = new Thickness(8, 0, 0, 0) };
+        if (_activeTab is not { } tab)
+        {
+            return;
+        }
+
+        string? name = await PromptForNameAsync("Rename Layout", tab.Name, "Rename");
+        if (name is not null && name != tab.Name)
+        {
+            tab.Name = UniqueLayoutName(name);
+            UpdateWindowTitle(tab);
+            MarkLayoutDirty();
+        }
+
+        tab.Active?.Focus();
+    }
+
+    /// <summary>
+    /// Saves only the active layout (its panes, splits and per-pane startup)
+    /// to layouts/NAME.json so it can be opened again later.
+    /// </summary>
+    private async Task SaveActiveLayoutAsAsync()
+    {
+        if (_activeTab is not { } tab)
+        {
+            return;
+        }
+
+        string? name = await PromptForNameAsync("Save Layout As", tab.Name, "Save");
+        if (name is null)
+        {
+            tab.Active?.Focus();
+            return;
+        }
+
+        TerminalWorkspaceDocument single = new()
+        {
+            SelectedWindowId = "window-1",
+            Windows =
+            [
+                new TerminalWorkspaceWindow
+                {
+                    Id = "window-1",
+                    WidthPixels = (int)Width,
+                    HeightPixels = (int)Height,
+                    SelectedTabId = "tab-1",
+                    Tabs =
+                    [
+                        new TerminalWorkspaceTab
+                        {
+                            Id = "tab-1",
+                            Title = name,
+                            WorkingDirectory = tab.Active is { } c && tab.Nodes.TryGetValue(c, out TerminalPaneNode? n)
+                                ? n.WorkingDirectory
+                                : null,
+                            RootPane = ToWorkspacePane(tab.Root),
+                        },
+                    ],
+                },
+            ],
+        };
+
+        string path = NamedLayouts.PathFor(name);
+        LayoutFile.Save(path, single, LiveStartups());
+        if (tab.Name != name && !_tabs.Any(t => t != tab && t.Name == name))
+        {
+            tab.Name = name;
+            UpdateWindowTitle(tab);
+            MarkLayoutDirty();
+        }
+
+        _status.Text = $"saved layout \"{name}\" -> {path}";
+        tab.Active?.Focus();
+    }
+
+    /// <summary>
+    /// Opens a saved layout as a new layout in this window (switch to it from
+    /// the Layouts menu). Pane ids are remapped so it can be opened next to
+    /// layouts that came from the same file.
+    /// </summary>
+    private async Task OpenSavedLayoutAsync(string name)
+    {
+        (TerminalWorkspaceDocument doc, Dictionary<string, PaneStartup> startups) =
+            LayoutFile.Load(NamedLayouts.PathFor(name));
+
+        List<Task> sessions = [];
+        Tab? first = null;
+        foreach (TerminalWorkspaceTab savedTab in doc.Windows.SelectMany(w => w.Tabs))
+        {
+            Dictionary<string, string> idMap = new(StringComparer.Ordinal);
+            TerminalWorkspacePane remapped = RemapPaneIds(savedTab.RootPane, idMap);
+            foreach ((string oldId, string newId) in idMap)
+            {
+                if (startups.TryGetValue(oldId, out PaneStartup? s))
+                {
+                    Startups[newId] = s.Clone();
+                }
+            }
+
+            (TerminalPaneNode root, Dictionary<TerminalControl, TerminalPaneNode> nodes) =
+                BuildPaneTree(remapped, sessions);
+            string layoutName = UniqueLayoutName(
+                doc.Windows.SelectMany(w => w.Tabs).Count() > 1 && savedTab.Title is { Length: > 0 } t
+                    ? t
+                    : name);
+            Tab tab = MakeTab(root, layoutName);
+            foreach ((TerminalControl control, TerminalPaneNode node) in nodes)
+            {
+                tab.Nodes[control] = node;
+            }
+
+            tab.Active = TerminalPaneLayout.CollectLeafControls(root).FirstOrDefault();
+            first ??= tab;
+        }
+
+        if (first is not null)
+        {
+            SwitchToLayout(first);
+        }
+
+        await Task.WhenAll(sessions);
+        MarkLayoutDirty();
+    }
+
+    private static TerminalWorkspacePane RemapPaneIds(TerminalWorkspacePane pane, Dictionary<string, string> map)
+    {
+        string newId = $"pane-{++_paneCounter}";
+        if (pane.Id is { Length: > 0 } oldId)
+        {
+            map[oldId] = newId;
+        }
+
+        return pane with
+        {
+            Id = newId,
+            Split = pane.Split is { } split
+                ? split with
+                {
+                    FirstPane = RemapPaneIds(split.FirstPane, map),
+                    SecondPane = RemapPaneIds(split.SecondPane, map),
+                }
+                : null,
+        };
+    }
+
+    private async Task<string?> PromptForNameAsync(string title, string initial, string okText)
+    {
+        TextBox nameBox = new() { Text = initial, Width = 260 };
+        Button ok = new() { Content = okText, IsDefault = true, Margin = new Thickness(8, 0, 0, 0) };
         Button cancel = new() { Content = "Cancel", IsCancel = true, Margin = new Thickness(8, 0, 0, 0) };
         StackPanel row = new() { Orientation = Orientation.Horizontal, Margin = new Thickness(12) };
         row.Children.Add(nameBox);
@@ -448,7 +636,7 @@ public sealed class MainWindow : Window
 
         Window dialog = new()
         {
-            Title = "Save Layout As",
+            Title = title,
             Content = row,
             SizeToContent = SizeToContent.WidthAndHeight,
             CanResize = false,
@@ -459,22 +647,18 @@ public sealed class MainWindow : Window
         string? result = null;
         ok.Click += (_, _) =>
         {
-            result = nameBox.Text;
+            result = nameBox.Text?.Trim();
             dialog.Close();
         };
         cancel.Click += (_, _) => dialog.Close();
-        dialog.Opened += (_, _) => nameBox.Focus();
+        dialog.Opened += (_, _) =>
+        {
+            nameBox.Focus();
+            nameBox.SelectAll();
+        };
 
         await dialog.ShowDialog(this);
-
-        if (!string.IsNullOrWhiteSpace(result))
-        {
-            SaveWorkspace();
-            string path = NamedLayouts.SaveAs(result);
-            _status.Text = $"saved layout \"{result}\" -> {path}   (open it later from Layouts, or run with --workspace {NamedLayouts.Sanitize(result)})";
-        }
-
-        ActiveTab()?.Active?.Focus();
+        return string.IsNullOrWhiteSpace(result) ? null : result;
     }
 
     // ----- self test --------------------------------------------------------
@@ -495,8 +679,8 @@ public sealed class MainWindow : Window
         {
             await SplitAsync(TerminalPaneSplitOrientation.Horizontal);
             await SplitAsync(TerminalPaneSplitOrientation.Vertical);
-            await NewTabAsync("/tmp");
-            _tabStrip.SelectedIndex = 0;
+            await NewTabAsync("/tmp", "tmp");
+            SwitchToLayout(_tabs[0]);
         }
 
         Tab? tab = ActiveTab();
@@ -543,6 +727,22 @@ public sealed class MainWindow : Window
             searchControl.EndSearch();
         }
 
+        // Layout switching: no tab strip; the shown layout changes, the
+        // others keep their sessions alive in the background.
+        if (_tabs.Count > 1)
+        {
+            Tab first = _tabs[0];
+            Tab second = _tabs[1];
+            SwitchToLayout(second);
+            bool showsSecond = ReferenceEquals(_layoutHost.Content, second.Host);
+            bool firstAlive = first.Nodes.Keys.All(c => c.HasActiveSession);
+            SwitchToLayout(first);
+            bool showsFirst = ReferenceEquals(_layoutHost.Content, first.Host);
+            bool secondAlive = second.Nodes.Keys.All(c => c.HasActiveSession);
+            Console.WriteLine($"SELFTEST layout_switch={showsSecond && showsFirst} background_alive={firstAlive && secondAlive}");
+            Console.WriteLine($"SELFTEST layout_names={string.Join(",", _tabs.Select(t => t.Name))}");
+        }
+
         // Exercise split UX: resize, equalize, zoom toggle round-trip.
         if (tab is not null && tab.Nodes.Count > 1)
         {
@@ -574,12 +774,12 @@ public sealed class MainWindow : Window
                 .FirstOrDefault(m => (string?)m.Header == "Split Right");
             if (tmpTab is not null && splitRight is not null)
             {
-                _tabStrip.SelectedItem = tmpTab.Item;
+                SwitchToLayout(tmpTab);
                 int before = tmpTab.Nodes.Count;
                 splitRight.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
                 await Task.Delay(1500);
                 Console.WriteLine($"SELFTEST menu_split_right={tmpTab.Nodes.Count == before + 1}");
-                _tabStrip.SelectedItem = _tabs[0].Item;
+                SwitchToLayout(_tabs[0]);
             }
             else
             {
@@ -611,14 +811,49 @@ public sealed class MainWindow : Window
         SaveWorkspace();
         Console.WriteLine($"SELFTEST workspace={WorkspacePath} exists={File.Exists(WorkspacePath)}");
 
-        if (!restored && NamedLayouts.ActiveName is null)
+        if (!restored && NamedLayouts.ActiveName is null && _tabs.Count > 0)
         {
+            // Save the active layout to a named file (with a per-pane startup),
+            // then open it back as an extra layout in this window.
             const string probe = "selftest-probe";
-            NamedLayouts.SaveAs(probe);
+            Tab src = _tabs[0];
+            string firstPaneId = src.Nodes.Values.First().Id;
+            Startups[firstPaneId] = new PaneStartup { Directory = "/tmp", Command = "true" };
+            TerminalWorkspaceDocument single = new()
+            {
+                SelectedWindowId = "window-1",
+                Windows =
+                [
+                    new TerminalWorkspaceWindow
+                    {
+                        Id = "window-1",
+                        SelectedTabId = "tab-1",
+                        Tabs = [new TerminalWorkspaceTab { Id = "tab-1", Title = probe, RootPane = ToWorkspacePane(src.Root) }],
+                    },
+                ],
+            };
+            LayoutFile.Save(NamedLayouts.PathFor(probe), single, LiveStartups());
             bool listed = NamedLayouts.List().Contains(probe);
+
+            int before = _tabs.Count;
+            await OpenSavedLayoutAsync(probe);
+            Tab? opened = _tabs.Count == before + 1 ? _tabs[^1] : null;
+            bool samePaneCount = opened is not null && opened.Nodes.Count == src.Nodes.Count;
+            bool startupCarried = opened is not null
+                && opened.Nodes.Values.Any(n => StartupFor(n) is { Command: "true" });
+            bool idsUnique = opened is not null
+                && !opened.Nodes.Values.Select(n => n.Id).Intersect(src.Nodes.Values.Select(n => n.Id)).Any();
+            Console.WriteLine($"SELFTEST layout_saved={listed} opened={opened is not null} name={opened?.Name} "
+                + $"panes_match={samePaneCount} startup_carried={startupCarried} ids_unique={idsUnique}");
+
+            if (opened is not null)
+            {
+                CloseTab(opened);
+            }
+
+            Startups.Remove(firstPaneId);
             NamedLayouts.Delete(probe);
-            bool removed = !NamedLayouts.List().Contains(probe);
-            Console.WriteLine($"SELFTEST named_layout_saved={listed} deleted={removed}");
+            SaveWorkspace();
         }
         _shuttingDown = true;
         foreach (MainWindow window in Windows.ToArray())
@@ -775,6 +1010,11 @@ public sealed class MainWindow : Window
             });
             e.Handled = true;
         }
+        else if (alt && !ctrl && e.Key >= Key.D1 && e.Key <= Key.D9 && (e.Key - Key.D1) < _tabs.Count)
+        {
+            SwitchToLayout(_tabs[e.Key - Key.D1]);
+            e.Handled = true;
+        }
         else if (alt && e.Key is Key.Left or Key.Right or Key.Up or Key.Down)
         {
             MoveFocus(e.Key switch
@@ -837,9 +1077,11 @@ public sealed class MainWindow : Window
                 && !string.IsNullOrWhiteSpace(title))
             {
                 tab.TitleFromOsc = true;
-                tab.Header.Text = Shorten(title, 32);
-                UpdateWindowTitle(tab);
-                MarkLayoutDirty();
+                tab.DisplayTitle = Shorten(title, 48);
+                if (ReferenceEquals(tab, _activeTab))
+                {
+                    UpdateWindowTitle(tab);
+                }
             }
         });
 
@@ -859,8 +1101,11 @@ public sealed class MainWindow : Window
                         {
                             if (!tab.TitleFromOsc)
                             {
-                                tab.Header.Text = CwdBasename(node.WorkingDirectory);
-                                UpdateWindowTitle(tab);
+                                tab.DisplayTitle = CwdBasename(node.WorkingDirectory);
+                                if (ReferenceEquals(tab, _activeTab))
+                                {
+                                    UpdateWindowTitle(tab);
+                                }
                             }
 
                             UpdateStatus(tab);
@@ -1050,69 +1295,61 @@ public sealed class MainWindow : Window
         }
     }
 
-    // ----- tabs ------------------------------------------------------------
+    // ----- layouts (formerly tabs) -------------------------------------------
 
-    private async Task NewTabAsync(string? cwd)
+    /// <summary>Creates a new one-pane layout and switches to it.</summary>
+    private async Task NewTabAsync(string? cwd, string? name = null)
     {
         TerminalControl terminal = CreateTerminal();
         TerminalPaneNode leaf = CreateLeaf(terminal, cwd);
 
-        Tab tab = MakeTab(leaf, "shell");
+        Tab tab = MakeTab(leaf, name ?? UniqueLayoutName("layout"));
         tab.Nodes[terminal] = leaf;
         tab.Active = terminal;
 
-        _tabStrip.SelectedItem = tab.Item;
+        SwitchToLayout(tab);
         await StartSessionAsync(terminal, cwd);
         terminal.Focus();
         UpdateStatus(tab);
         MarkLayoutDirty();
     }
 
-    private Tab MakeTab(TerminalPaneNode root, string title)
+    private Tab MakeTab(TerminalPaneNode root, string name)
     {
-        TextBlock header = new()
-        {
-            Text = title,
-            FontSize = 12,
-            VerticalAlignment = VerticalAlignment.Center,
-        };
-
-        Button closeButton = new()
-        {
-            Content = "\u00d7",
-            FontSize = 12,
-            Padding = new Thickness(4, 0),
-            Margin = new Thickness(6, 0, 0, 0),
-            Background = Brushes.Transparent,
-            BorderThickness = new Thickness(0),
-            VerticalAlignment = VerticalAlignment.Center,
-        };
-
-        StackPanel headerPanel = new()
-        {
-            Orientation = Orientation.Horizontal,
-        };
-        headerPanel.Children.Add(header);
-        headerPanel.Children.Add(closeButton);
-
         Border host = new() { Child = root.Visual };
-        TabItem item = new() { Header = headerPanel, Content = host };
-
-        Tab tab = new() { Item = item, Header = header, Host = host, Root = root };
-        closeButton.Click += (_, _) => CloseTab(tab);
-        item.PointerPressed += (_, e) =>
-        {
-            if (e.GetCurrentPoint(item).Properties.IsMiddleButtonPressed)
-            {
-                CloseTab(tab);
-                e.Handled = true;
-            }
-        };
-
+        Tab tab = new() { Name = name, Host = host, Root = root };
         _tabs.Add(tab);
-        // Keep the "+" pseudo-tab last.
-        _tabStrip.Items.Insert(_tabStrip.Items.Count - 1, item);
         return tab;
+    }
+
+    /// <summary>Shows one layout; the others stay alive off-screen.</summary>
+    private void SwitchToLayout(Tab tab)
+    {
+        _activeTab = tab;
+        _layoutHost.Content = tab.Host;
+        UpdateWindowTitle(tab);
+        UpdateStatus(tab);
+        UpdateFocusBorders(tab);
+        Dispatcher.UIThread.Post(() => tab.Active?.Focus(), DispatcherPriority.Background);
+        MarkLayoutDirty();
+    }
+
+    private string UniqueLayoutName(string stem)
+    {
+        HashSet<string> used = new(_tabs.Select(t => t.Name), StringComparer.OrdinalIgnoreCase);
+        if (!used.Contains(stem))
+        {
+            return stem;
+        }
+
+        for (int i = 2; ; i++)
+        {
+            string candidate = $"{stem} {i}";
+            if (!used.Contains(candidate))
+            {
+                return candidate;
+            }
+        }
     }
 
     private void MoveTab(int delta)
@@ -1132,9 +1369,6 @@ public sealed class MainWindow : Window
 
         _tabs.RemoveAt(from);
         _tabs.Insert(to, tab);
-        _tabStrip.Items.Remove(tab.Item);
-        _tabStrip.Items.Insert(to, tab.Item);
-        _tabStrip.SelectedItem = tab.Item;
         MarkLayoutDirty();
     }
 
@@ -1147,8 +1381,7 @@ public sealed class MainWindow : Window
 
         int index = ActiveTab() is { } current ? _tabs.IndexOf(current) : 0;
         index = (index + delta + _tabs.Count) % _tabs.Count;
-        _tabStrip.SelectedItem = _tabs[index].Item;
-        _tabs[index].Active?.Focus();
+        SwitchToLayout(_tabs[index]);
     }
 
     private void CloseTab(Tab tab)
@@ -1158,20 +1391,22 @@ public sealed class MainWindow : Window
             StopQuietly(control);
         }
 
+        int index = _tabs.IndexOf(tab);
         _tabs.Remove(tab);
-        _tabStrip.Items.Remove(tab.Item);
+        if (ReferenceEquals(_layoutHost.Content, tab.Host))
+        {
+            _layoutHost.Content = null;
+        }
+
         MarkLayoutDirty();
 
         if (_tabs.Count == 0)
         {
             Close();
         }
-        else
+        else if (ReferenceEquals(_activeTab, tab))
         {
-            // Select explicitly so Avalonia doesn't land on the "+" pseudo-tab.
-            Tab next = _tabs[^1];
-            _tabStrip.SelectedItem = next.Item;
-            next.Active?.Focus();
+            SwitchToLayout(_tabs[Math.Clamp(index - 1, 0, _tabs.Count - 1)]);
         }
     }
 
@@ -1575,7 +1810,7 @@ public sealed class MainWindow : Window
         Tabs = _tabs.Select(tab => new TerminalWorkspaceTab
         {
             Id = TabId(tab),
-            Title = tab.Header.Text,
+            Title = tab.Name,
             WorkingDirectory = tab.Active is { } control
                 && tab.Nodes.TryGetValue(control, out TerminalPaneNode? node)
                 ? node.WorkingDirectory
@@ -1705,7 +1940,9 @@ public sealed class MainWindow : Window
             (TerminalPaneNode root, Dictionary<TerminalControl, TerminalPaneNode> nodes) =
                 BuildPaneTree(savedTab.RootPane, sessions);
 
-            Tab tab = MakeTab(root, savedTab.Title ?? "shell");
+            Tab tab = MakeTab(root, savedTab.Title is { Length: > 0 } savedName
+                ? UniqueLayoutName(savedName)
+                : UniqueLayoutName("layout"));
             foreach ((TerminalControl control, TerminalPaneNode node) in nodes)
             {
                 tab.Nodes[control] = node;
@@ -1722,7 +1959,7 @@ public sealed class MainWindow : Window
         selected ??= _tabs.FirstOrDefault();
         if (selected is not null)
         {
-            _tabStrip.SelectedItem = selected.Item;
+            SwitchToLayout(selected);
         }
 
         await Task.WhenAll(sessions);
@@ -1822,13 +2059,19 @@ public sealed class MainWindow : Window
     }
 
     private Tab? ActiveTab() =>
-        _tabStrip.SelectedItem is TabItem item ? _tabs.FirstOrDefault(t => t.Item == item) : null;
+        _activeTab is not null && _tabs.Contains(_activeTab) ? _activeTab : null;
 
     private Tab? FindTab(TerminalControl control) =>
         _tabs.FirstOrDefault(t => t.Nodes.ContainsKey(control));
 
-    private void UpdateWindowTitle(Tab tab) =>
-        Title = $"{tab.Header.Text} — spike-royalterminal";
+    private void UpdateWindowTitle(Tab tab)
+    {
+        string detail = tab.DisplayTitle is { Length: > 0 } d && !string.Equals(d, tab.Name, StringComparison.Ordinal)
+            ? $" — {d}"
+            : string.Empty;
+        string count = _tabs.Count > 1 ? $" ({_tabs.IndexOf(tab) + 1}/{_tabs.Count})" : string.Empty;
+        Title = $"{tab.Name}{count}{detail} — spike-royalterminal";
+    }
 
     private void UpdateStatus(Tab tab)
     {
