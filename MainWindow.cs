@@ -53,6 +53,10 @@ public sealed class MainWindow : Window
     }
 
     private readonly List<Tab> _tabs = [];
+    private readonly DispatcherTimer _autosave;
+    private System.Runtime.InteropServices.PosixSignalRegistration? _sigterm;
+    private bool _layoutDirty;
+    private bool _restoring;
 
     public MainWindow()
     {
@@ -100,6 +104,72 @@ public sealed class MainWindow : Window
             }
         };
         Closing += (_, _) => SaveWorkspace();
+
+        // Debounced autosave: marks dirty on layout changes, writes at most
+        // every 5 s, so a crash or kill -9 loses almost nothing.
+        _autosave = new DispatcherTimer(
+            TimeSpan.FromSeconds(5),
+            DispatcherPriority.Background,
+            (_, _) =>
+            {
+                if (_layoutDirty && !_restoring)
+                {
+                    _layoutDirty = false;
+                    SaveWorkspace();
+                }
+            });
+        _autosave.Start();
+
+        // Window-size changes count as layout changes.
+        PropertyChanged += (_, e) =>
+        {
+            if (e.Property == BoundsProperty || e.Property == WindowStateProperty)
+            {
+                MarkLayoutDirty();
+            }
+        };
+
+        // Save on SIGTERM / SIGINT (systemd stop, kill, Ctrl+C from launcher)
+        // and on normal process exit. SaveWorkspace marshals itself onto the
+        // UI thread when called from a POSIX signal thread.
+        AppDomain.CurrentDomain.ProcessExit += (_, _) => SaveWorkspaceFromAnyThread();
+        Console.CancelKeyPress += (_, args) =>
+        {
+            SaveWorkspaceFromAnyThread();
+            args.Cancel = false;
+        };
+        if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
+        {
+            _sigterm = System.Runtime.InteropServices.PosixSignalRegistration.Create(
+                System.Runtime.InteropServices.PosixSignal.SIGTERM,
+                context =>
+                {
+                    context.Cancel = true;
+                    SaveWorkspaceFromAnyThread();
+                    Dispatcher.UIThread.Post(Close);
+                });
+        }
+    }
+
+    private void MarkLayoutDirty() => _layoutDirty = true;
+
+    private void SaveWorkspaceFromAnyThread()
+    {
+        if (Dispatcher.UIThread.CheckAccess())
+        {
+            SaveWorkspace();
+            return;
+        }
+
+        try
+        {
+            Dispatcher.UIThread.Invoke(SaveWorkspace, DispatcherPriority.Send, default,
+                TimeSpan.FromSeconds(3));
+        }
+        catch
+        {
+            // UI thread gone or wedged; nothing more we can do safely.
+        }
     }
 
     // ----- self test --------------------------------------------------------
@@ -293,6 +363,7 @@ public sealed class MainWindow : Window
                     if (tab is not null && tab.Nodes.TryGetValue(terminal, out TerminalPaneNode? node))
                     {
                         node.SetWorkingDirectory(NormalizeCwd(cwd));
+                        MarkLayoutDirty();
                         if (ReferenceEquals(tab.Active, terminal))
                         {
                             UpdateStatus(tab);
@@ -350,6 +421,7 @@ public sealed class MainWindow : Window
         await StartSessionAsync(terminal, cwd);
         terminal.Focus();
         UpdateStatus(tab);
+        MarkLayoutDirty();
     }
 
     private Tab MakeTab(TerminalPaneNode root, string title)
@@ -386,6 +458,7 @@ public sealed class MainWindow : Window
 
         _tabs.Remove(tab);
         _tabStrip.Items.Remove(tab.Item);
+        MarkLayoutDirty();
 
         if (_tabs.Count == 0)
         {
@@ -454,6 +527,7 @@ public sealed class MainWindow : Window
         await StartSessionAsync(newControl, cwd);
         newControl.Focus();
         UpdateStatus(tab);
+        MarkLayoutDirty();
     }
 
     private void ClosePane(TerminalControl? target = null)
@@ -504,6 +578,7 @@ public sealed class MainWindow : Window
         tab.Active = TerminalPaneLayout.CollectLeafControls(tab.Root).FirstOrDefault();
         tab.Active?.Focus();
         UpdateStatus(tab);
+        MarkLayoutDirty();
     }
 
     private static void DetachFromParent(Control visual)
@@ -648,6 +723,20 @@ public sealed class MainWindow : Window
     }
 
     private async Task RestoreWorkspaceAsync()
+    {
+        _restoring = true;
+        try
+        {
+            await RestoreWorkspaceCoreAsync();
+        }
+        finally
+        {
+            _restoring = false;
+            _layoutDirty = false;
+        }
+    }
+
+    private async Task RestoreWorkspaceCoreAsync()
     {
         TerminalWorkspaceDocument document;
         try
