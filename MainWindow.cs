@@ -142,7 +142,7 @@ public sealed class MainWindow : Window
 
     /// <summary>Splash on unless config says no or we're doing a headless one-shot.</summary>
     internal static bool SplashEnabled =>
-        Config.ShowSplash && !Environment.GetCommandLineArgs().Contains("--dump-panes");
+        Config.ShowSplash != false && !Environment.GetCommandLineArgs().Contains("--dump-panes");
 
     private static void ReportSplash(string status, int done = 0, int total = 0) =>
         Splash?.Report(status, done, total);
@@ -155,6 +155,10 @@ public sealed class MainWindow : Window
             ReportSplash(status, done, total);
         }
     }
+
+    /// <summary>Gives the splash a chance to repaint between blocking restore steps.</summary>
+    private Task YieldForSplashAsync() =>
+        _isPrimary && Splash is { } splash ? splash.YieldForPaintAsync() : Task.CompletedTask;
 
     public MainWindow()
         : this(null, isPrimary: true)
@@ -223,6 +227,11 @@ public sealed class MainWindow : Window
 
         Opened += async (_, _) =>
         {
+            if (_isPrimary)
+            {
+                SplashWindow.Log("main window opened");
+            }
+
             try
             {
                 await RestoreWorkspaceAsync();
@@ -2561,6 +2570,7 @@ public sealed class MainWindow : Window
         if (window is null && Config.RestoreLayout)
         {
             ReportProgress($"reading {Path.GetFileName(WorkspacePath)}…");
+            await YieldForSplashAsync();
             TerminalWorkspaceDocument document;
             try
             {
@@ -2604,7 +2614,8 @@ public sealed class MainWindow : Window
         foreach (TerminalWorkspaceTab savedTab in window.Tabs)
         {
             layoutIndex++;
-            ReportProgress($"building layout \"{savedTab.Title}\" ({layoutIndex}/{window.Tabs.Count})…");
+            ReportProgress($"building layout \"{savedTab.Title}\" ({layoutIndex}/{window.Tabs.Count})…", layoutIndex - 1, window.Tabs.Count);
+            await YieldForSplashAsync();
             (TerminalPaneNode root, Dictionary<TerminalControl, TerminalPaneNode> nodes) =
                 BuildPaneTree(savedTab.RootPane, sessions);
 

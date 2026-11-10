@@ -58,16 +58,27 @@ public sealed class App : Application
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            // Splash first, so something appears immediately; the main window
-            // restores the layout behind it and closes it when done.
+            // Splash first. The main window (whose restore blocks the UI
+            // thread while panes are built) is only created once the splash
+            // has actually painted, otherwise it never gets a frame on screen.
             if (MainWindow.SplashEnabled)
             {
                 SplashWindow splash = new();
-                splash.Show();
                 MainWindow.Splash = splash;
+                splash.Show();
+                splash.FirstFrame.ContinueWith(
+                    _ => Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                    {
+                        MainWindow main = new();
+                        desktop.MainWindow = main;
+                        main.Show();
+                    }),
+                    TaskScheduler.Default);
             }
-
-            desktop.MainWindow = new MainWindow();
+            else
+            {
+                desktop.MainWindow = new MainWindow();
+            }
         }
 
         base.OnFrameworkInitializationCompleted();

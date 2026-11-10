@@ -16,8 +16,8 @@ namespace Wraithcairn;
 /// </summary>
 public sealed class SplashWindow : Window
 {
-    /// <summary>Keep the splash up at least this long so it doesn't just flash.</summary>
-    private static readonly TimeSpan MinimumVisible = TimeSpan.FromMilliseconds(700);
+    /// <summary>Keep the splash up at least this long after it first paints.</summary>
+    private static readonly TimeSpan MinimumVisible = TimeSpan.FromMilliseconds(900);
 
     private static readonly Color Background0 = Color.Parse("#14191f");
     private static readonly Color Accent = Color.Parse("#5FD9BD");
@@ -25,11 +25,26 @@ public sealed class SplashWindow : Window
 
     private readonly TextBlock _status;
     private readonly ProgressBar _progress;
-    private readonly DateTime _shownAt = DateTime.UtcNow;
+    private readonly TaskCompletionSource _firstFrame = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private DateTime _shownAt = DateTime.UtcNow;
     private bool _closing;
+
+    /// <summary>Completes once the splash has actually been painted on screen.</summary>
+    public Task FirstFrame => _firstFrame.Task;
 
     /// <summary>Status lines reported so far (for the selftest).</summary>
     public List<string> History { get; } = [];
+
+    private static readonly bool Trace = Environment.GetEnvironmentVariable("WRAITHCAIRN_TRACE") == "1";
+    private static readonly System.Diagnostics.Stopwatch Clock = System.Diagnostics.Stopwatch.StartNew();
+
+    internal static void Log(string message)
+    {
+        if (Trace)
+        {
+            Console.WriteLine($"TRACE splash +{Clock.ElapsedMilliseconds}ms {message}");
+        }
+    }
 
     public SplashWindow()
     {
@@ -128,6 +143,35 @@ public sealed class SplashWindow : Window
             BorderBrush = new SolidColorBrush(Color.Parse("#2b3640")),
             BorderThickness = new Thickness(1),
         };
+
+        Log("constructed");
+        Opened += (_, _) =>
+        {
+            Log($"opened bounds={Bounds.Size} visible={IsVisible}");
+
+            // Two animation frames after Opened the window has been rendered
+            // and handed to the compositor. Fallback timer in case frames
+            // never tick (headless, odd WMs).
+            RequestAnimationFrame(_ => RequestAnimationFrame(_ => MarkPainted("painted")));
+            DispatcherTimer.RunOnce(() => MarkPainted("paint timeout"), TimeSpan.FromMilliseconds(600));
+        };
+        Closed += (_, _) => Log("closed");
+        LayoutUpdated += OnFirstLayout;
+    }
+
+    private void MarkPainted(string why)
+    {
+        if (_firstFrame.TrySetResult())
+        {
+            _shownAt = DateTime.UtcNow;
+            Log(why);
+        }
+    }
+
+    private void OnFirstLayout(object? sender, EventArgs e)
+    {
+        LayoutUpdated -= OnFirstLayout;
+        Log("first layout");
     }
 
     /// <summary>Updates the status line; with a total, shows determinate progress.</summary>
@@ -140,6 +184,7 @@ public sealed class SplashWindow : Window
         }
 
         History.Add(status);
+        Log($"report \"{status}\"");
         _status.Text = status;
         if (total > 0)
         {
@@ -162,6 +207,7 @@ public sealed class SplashWindow : Window
         }
 
         _closing = true;
+        await FirstFrame;
         TimeSpan shown = DateTime.UtcNow - _shownAt;
         if (shown < MinimumVisible)
         {
@@ -169,6 +215,18 @@ public sealed class SplashWindow : Window
         }
 
         Close();
+    }
+
+    /// <summary>
+    /// Lets the splash render a frame (status text, progress) before more
+    /// synchronous restore work blocks the UI thread again. Waits for a real
+    /// animation frame, capped so a stalled compositor can't hang startup.
+    /// </summary>
+    public async Task YieldForPaintAsync()
+    {
+        TaskCompletionSource frame = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        RequestAnimationFrame(_ => RequestAnimationFrame(_ => frame.TrySetResult()));
+        await Task.WhenAny(frame.Task, Task.Delay(100));
     }
 
     private static Bitmap? LoadBitmap(string file)
