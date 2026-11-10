@@ -91,6 +91,7 @@ public sealed class MainWindow : Window
     private static MainWindow? _lastFocused;
     private static bool _saving;
     private static bool _shuttingDown;
+    private static int _scrollbackRestored;
     private readonly TerminalWorkspaceWindow? _pendingRestore;
     private readonly bool _isPrimary;
 
@@ -400,6 +401,7 @@ public sealed class MainWindow : Window
         Console.WriteLine($"SELFTEST config font={Config.FontFamily ?? "(default)"} size={Config.FontSize} "
             + $"theme={Config.Theme ?? "(none)"} copyOnSelect={Config.CopyOnSelect}");
         Console.WriteLine($"SELFTEST config_sources={string.Join(" | ", Config.Sources)}");
+        Console.WriteLine($"SELFTEST scrollback enabled={Config.RestoreScrollback} restored_panes={_scrollbackRestored}");
         if (tab?.Active is { } themed)
         {
             Console.WriteLine($"SELFTEST pane_font={themed.FontFamilyName} size={themed.TerminalFontSize}");
@@ -417,6 +419,12 @@ public sealed class MainWindow : Window
             : string.Empty;
         bool sawEcho = screenText.Contains("spike-selftest-42");
         Console.WriteLine($"SELFTEST echo_output_visible={sawEcho}");
+
+        if (restored && Config.RestoreScrollback)
+        {
+            bool sawMarker = screenText.Contains("restored scrollback");
+            Console.WriteLine($"SELFTEST scrollback_marker_visible={sawMarker}");
+        }
 
         if (tab?.Active is { } searchControl)
         {
@@ -709,7 +717,10 @@ public sealed class MainWindow : Window
         return terminal;
     }
 
-    private async Task StartSessionAsync(TerminalControl terminal, string? workingDirectory)
+    private async Task StartSessionAsync(
+        TerminalControl terminal,
+        string? workingDirectory,
+        bool preserveScrollback = false)
     {
         Dictionary<string, string> environment = new()
         {
@@ -731,13 +742,21 @@ public sealed class MainWindow : Window
             Environment: environment,
             Dimensions: new TerminalSessionDimensions(120, 30, 1200, 700));
 
-        await terminal.StartSessionAsync(options);
+        await terminal.StartSessionAsync(options, preserveScrollback);
     }
 
-    private TerminalPaneNode CreateLeaf(TerminalControl terminal, string? cwd)
+    private TerminalPaneNode CreateLeaf(TerminalControl terminal, string? cwd, string? id = null)
     {
+        // Reuse saved ids so per-pane scrollback files line up across runs;
+        // keep the counter ahead of any restored numeric id.
+        if (id is not null && id.StartsWith("pane-", StringComparison.Ordinal)
+            && int.TryParse(id.AsSpan(5), out int n) && n > _paneCounter)
+        {
+            _paneCounter = n;
+        }
+
         TerminalPaneNode node = new(
-            id: $"pane-{++_paneCounter}",
+            id: id ?? $"pane-{++_paneCounter}",
             workingDirectory: cwd,
             transportId: TerminalTransportIds.Pty);
         Border paneBorder = new()
@@ -1228,6 +1247,14 @@ public sealed class MainWindow : Window
             };
 
             _workspaceStore.SaveAsync(document).AsTask().GetAwaiter().GetResult();
+
+            if (Config.RestoreScrollback)
+            {
+                ScrollbackStore.SaveAll(Windows
+                    .SelectMany(w => w._tabs)
+                    .SelectMany(t => t.Nodes)
+                    .Select(kv => (kv.Value.Id, kv.Key)));
+            }
         }
         catch (Exception ex)
         {
@@ -1432,9 +1459,15 @@ public sealed class MainWindow : Window
         if (saved.Split is not TerminalWorkspacePaneSplit split)
         {
             TerminalControl terminal = CreateTerminal();
-            TerminalPaneNode leaf = CreateLeaf(terminal, saved.WorkingDirectory);
+            TerminalPaneNode leaf = CreateLeaf(terminal, saved.WorkingDirectory, saved.Id);
             nodes[terminal] = leaf;
-            sessions.Add(StartSessionAsync(terminal, saved.WorkingDirectory));
+            bool replayed = Config.RestoreScrollback && ScrollbackStore.TryRestore(saved.Id, terminal);
+            if (replayed)
+            {
+                _scrollbackRestored++;
+            }
+
+            sessions.Add(StartSessionAsync(terminal, saved.WorkingDirectory, preserveScrollback: replayed));
             return leaf;
         }
 
@@ -1447,7 +1480,13 @@ public sealed class MainWindow : Window
                 : TerminalPaneSplitOrientation.Horizontal;
 
         Grid grid = TerminalPaneLayout.CreateSplitGrid(orientation, split.Ratio, first.Visual, second.Visual);
-        TerminalPaneNode node = new($"pane-{++_paneCounter}");
+        TerminalPaneNode node = new(saved.Id is { Length: > 0 } splitId ? splitId : $"pane-{++_paneCounter}");
+        if (saved.Id is not null && saved.Id.StartsWith("pane-", StringComparison.Ordinal)
+            && int.TryParse(saved.Id.AsSpan(5), out int splitN) && splitN > _paneCounter)
+        {
+            _paneCounter = splitN;
+        }
+
         node.SetSplit(orientation, split.Ratio, first, second, grid);
         return node;
     }

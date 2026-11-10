@@ -31,6 +31,9 @@ public sealed class AppConfig
     /// <summary>Restore the saved layout on launch (false = always start fresh).</summary>
     public bool RestoreLayout { get; set; } = true;
 
+    /// <summary>Also save/replay each pane's scrollback (styled text, capped per pane).</summary>
+    public bool RestoreScrollback { get; set; }
+
     /// <summary>Read ~/.config/ghostty/config as a base layer.</summary>
     public bool UseGhosttyConfig { get; set; } = true;
 
@@ -84,6 +87,7 @@ public sealed class AppConfig
 
             if (appOverrides._copyOnSelectSet) config.CopyOnSelect = appOverrides.CopyOnSelect;
             config.RestoreLayout = appOverrides.RestoreLayout;
+            config.RestoreScrollback = appOverrides.RestoreScrollback;
             config.UseGhosttyConfig = appOverrides.UseGhosttyConfig;
             if (appOverrides.Shell is not null) config.Shell = appOverrides.Shell;
             config.Sources.Add(AppConfigPath);
@@ -153,6 +157,8 @@ public sealed class AppConfig
                   // "copyOnSelect": true,
                   // "shell": "/usr/bin/fish",
                   "restoreLayout": true,
+                  // Also bring back each pane's previous output (styled, capped).
+                  "restoreScrollback": false,
                   "useGhosttyConfig": true
                 }
 
