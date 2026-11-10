@@ -27,6 +27,7 @@ namespace SpikeRoyalTerminal;
 ///   Ctrl+Shift+C / V    copy selection / paste
 ///   Ctrl+Shift+F        find (Enter next, Shift+Enter prev, Esc close)
 ///   Ctrl+Shift+K        clear scrollback
+///   Ctrl+Shift+N        new window
 ///   Ctrl+PgUp/PgDn      previous / next tab
 ///   Ctrl+Shift+PgUp/PgDn move tab left / right
 ///   Ctrl+= / Ctrl+-     font size
@@ -47,7 +48,7 @@ public sealed class MainWindow : Window
     private readonly Border _searchBar;
     private readonly ShellIntegration.LaunchSpec _shell = ShellIntegration.Resolve();
     private double _fontSize = 13;
-    private int _paneCounter;
+    private static int _paneCounter;
 
     private sealed class Tab
     {
@@ -82,8 +83,26 @@ public sealed class MainWindow : Window
     private bool _layoutDirty;
     private bool _restoring;
 
+    // ----- multi-window registry -------------------------------------------
+
+    private static readonly List<MainWindow> Windows = [];
+    private static MainWindow? _lastFocused;
+    private static bool _saving;
+    private static bool _shuttingDown;
+    private readonly TerminalWorkspaceWindow? _pendingRestore;
+    private readonly bool _isPrimary;
+
     public MainWindow()
+        : this(null, isPrimary: true)
     {
+    }
+
+    private MainWindow(TerminalWorkspaceWindow? restore, bool isPrimary)
+    {
+        _pendingRestore = restore;
+        _isPrimary = isPrimary;
+        Windows.Add(this);
+        Activated += (_, _) => _lastFocused = this;
         Title = "spike-royalterminal";
         Width = 1200;
         Height = 800;
@@ -148,7 +167,7 @@ public sealed class MainWindow : Window
             try
             {
                 await RestoreWorkspaceAsync();
-                if (Environment.GetCommandLineArgs().Contains("--selftest"))
+                if (_isPrimary && Environment.GetCommandLineArgs().Contains("--selftest"))
                 {
                     await RunSelfTestAsync();
                 }
@@ -158,7 +177,28 @@ public sealed class MainWindow : Window
                 Console.Error.WriteLine($"startup failed: {ex}");
             }
         };
-        Closing += (_, _) => SaveWorkspace();
+        Closing += (_, _) =>
+        {
+            if (_shuttingDown)
+            {
+                return; // final save already happened
+            }
+
+            // A deliberately closed window should not come back: drop it from
+            // the registry first, then persist whatever windows remain (or
+            // this one alone when it is the last).
+            Windows.Remove(this);
+            if (Windows.Count == 0)
+            {
+                Windows.Add(this);
+                SaveWorkspace();
+                Windows.Remove(this);
+            }
+            else
+            {
+                SaveWorkspace();
+            }
+        };
 
         // Debounced autosave: marks dirty on layout changes, writes at most
         // every 5 s, so a crash or kill -9 loses almost nothing.
@@ -186,23 +226,34 @@ public sealed class MainWindow : Window
 
         // Save on SIGTERM / SIGINT (systemd stop, kill, Ctrl+C from launcher)
         // and on normal process exit. SaveWorkspace marshals itself onto the
-        // UI thread when called from a POSIX signal thread.
-        AppDomain.CurrentDomain.ProcessExit += (_, _) => SaveWorkspaceFromAnyThread();
-        Console.CancelKeyPress += (_, args) =>
+        // UI thread when called from a POSIX signal thread. Only the primary
+        // window registers process-level hooks.
+        if (_isPrimary)
         {
-            SaveWorkspaceFromAnyThread();
-            args.Cancel = false;
-        };
-        if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
-        {
-            _sigterm = System.Runtime.InteropServices.PosixSignalRegistration.Create(
-                System.Runtime.InteropServices.PosixSignal.SIGTERM,
-                context =>
-                {
-                    context.Cancel = true;
-                    SaveWorkspaceFromAnyThread();
-                    Dispatcher.UIThread.Post(Close);
-                });
+            AppDomain.CurrentDomain.ProcessExit += (_, _) => SaveWorkspaceFromAnyThread();
+            Console.CancelKeyPress += (_, args) =>
+            {
+                SaveWorkspaceFromAnyThread();
+                args.Cancel = false;
+            };
+            if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
+            {
+                _sigterm = System.Runtime.InteropServices.PosixSignalRegistration.Create(
+                    System.Runtime.InteropServices.PosixSignal.SIGTERM,
+                    context =>
+                    {
+                        context.Cancel = true;
+                        SaveWorkspaceFromAnyThread();
+                        Dispatcher.UIThread.Post(() =>
+                        {
+                            _shuttingDown = true;
+                            foreach (MainWindow window in Windows.ToArray())
+                            {
+                                window.Close();
+                            }
+                        });
+                    });
+            }
         }
     }
 
@@ -237,7 +288,9 @@ public sealed class MainWindow : Window
     /// </summary>
     private async Task RunSelfTestAsync()
     {
-        bool restored = _tabs.Count > 1 || (_tabs.Count == 1 && _tabs[0].Nodes.Count > 1);
+        bool restored = Windows.Count > 1
+            || _tabs.Count > 1
+            || (_tabs.Count == 1 && _tabs[0].Nodes.Count > 1);
 
         if (!restored)
         {
@@ -296,11 +349,40 @@ public sealed class MainWindow : Window
             Console.WriteLine($"SELFTEST zoom_roundtrip={zoomedIn && zoomedOut}");
         }
 
+        // Multi-window: first phase opens a second window with one tab;
+        // restored phase just reports how many windows came back.
+        if (!restored)
+        {
+            MainWindow second = new(
+                new TerminalWorkspaceWindow
+                {
+                    Id = "selftest-2",
+                    Tabs = [new TerminalWorkspaceTab { Id = "t1", WorkingDirectory = "/tmp" }],
+                },
+                isPrimary: false);
+            second.Show();
+            await Task.Delay(1500);
+        }
+
+        Console.WriteLine($"SELFTEST windows={Windows.Count}");
+
+        // Keep the primary window as the one restore selects next launch.
+        _lastFocused = this;
+
         SnapshotWindow($"/tmp/spike-selftest-{phase}.png");
         Console.WriteLine($"SELFTEST snapshot=/tmp/spike-selftest-{phase}.png");
 
         SaveWorkspace();
         Console.WriteLine($"SELFTEST workspace={WorkspacePath} exists={File.Exists(WorkspacePath)}");
+        _shuttingDown = true;
+        foreach (MainWindow window in Windows.ToArray())
+        {
+            if (!ReferenceEquals(window, this))
+            {
+                window.Close();
+            }
+        }
+
         Close();
     }
 
@@ -391,6 +473,7 @@ public sealed class MainWindow : Window
         else if (ctrlShift && e.Key == Key.V && ActiveTab()?.Active is { } pasteTarget) { _ = pasteTarget.PasteAsync(); e.Handled = true; }
         else if (ctrlShift && e.Key == Key.F) { OpenSearch(); e.Handled = true; }
         else if (ctrlShift && e.Key == Key.K && ActiveTab()?.Active is { } clearTarget) { clearTarget.ClearScrollback(); e.Handled = true; }
+        else if (ctrlShift && e.Key == Key.N) { new MainWindow(null, isPrimary: false).Show(); e.Handled = true; }
         else if (ctrlShift && e.Key is Key.OemPlus or Key.Add) { EqualizeSplits(); e.Handled = true; }
         else if (ctrlShift && e.Key == Key.PageDown) { MoveTab(1); e.Handled = true; }
         else if (ctrlShift && e.Key == Key.PageUp) { MoveTab(-1); e.Handled = true; }
@@ -990,33 +1073,19 @@ public sealed class MainWindow : Window
 
     private void SaveWorkspace()
     {
+        if (_saving)
+        {
+            return;
+        }
+
+        _saving = true;
         try
         {
+            MainWindow focused = _lastFocused is { } lf && Windows.Contains(lf) ? lf : this;
             TerminalWorkspaceDocument document = new()
             {
-                SelectedWindowId = "main",
-                Windows =
-                [
-                    new TerminalWorkspaceWindow
-                    {
-                        Id = "main",
-                        Title = Title,
-                        WidthPixels = (int)Width,
-                        HeightPixels = (int)Height,
-                        IsMaximized = WindowState == WindowState.Maximized,
-                        SelectedTabId = ActiveTab() is { } active ? TabId(active) : null,
-                        Tabs = _tabs.Select(tab => new TerminalWorkspaceTab
-                        {
-                            Id = TabId(tab),
-                            Title = tab.Header.Text,
-                            WorkingDirectory = tab.Active is { } control
-                                && tab.Nodes.TryGetValue(control, out TerminalPaneNode? node)
-                                ? node.WorkingDirectory
-                                : null,
-                            RootPane = ToWorkspacePane(tab.Root),
-                        }).ToList(),
-                    },
-                ],
+                SelectedWindowId = focused.WindowId(),
+                Windows = Windows.Select(w => w.ToWorkspaceWindow()).ToList(),
             };
 
             _workspaceStore.SaveAsync(document).AsTask().GetAwaiter().GetResult();
@@ -1025,9 +1094,35 @@ public sealed class MainWindow : Window
         {
             Console.Error.WriteLine($"workspace save failed: {ex.Message}");
         }
+        finally
+        {
+            _saving = false;
+        }
     }
 
-    private string TabId(Tab tab) => $"tab-{_tabs.IndexOf(tab) + 1}";
+    private string WindowId() => $"window-{Windows.IndexOf(this) + 1}";
+
+    private TerminalWorkspaceWindow ToWorkspaceWindow() => new()
+    {
+        Id = WindowId(),
+        Title = Title,
+        WidthPixels = (int)Width,
+        HeightPixels = (int)Height,
+        IsMaximized = WindowState == WindowState.Maximized,
+        SelectedTabId = ActiveTab() is { } active ? TabId(active) : null,
+        Tabs = _tabs.Select(tab => new TerminalWorkspaceTab
+        {
+            Id = TabId(tab),
+            Title = tab.Header.Text,
+            WorkingDirectory = tab.Active is { } control
+                && tab.Nodes.TryGetValue(control, out TerminalPaneNode? node)
+                ? node.WorkingDirectory
+                : null,
+            RootPane = ToWorkspacePane(tab.Root),
+        }).ToList(),
+    };
+
+    private string TabId(Tab tab) => $"{WindowId()}-tab-{_tabs.IndexOf(tab) + 1}";
 
     private static TerminalWorkspacePane ToWorkspacePane(TerminalPaneNode node)
     {
@@ -1100,18 +1195,29 @@ public sealed class MainWindow : Window
 
     private async Task RestoreWorkspaceCoreAsync()
     {
-        TerminalWorkspaceDocument document;
-        try
+        TerminalWorkspaceWindow? window = _pendingRestore;
+        List<TerminalWorkspaceWindow> siblings = [];
+
+        if (window is null)
         {
-            document = await _workspaceStore.LoadAsync();
-        }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine($"workspace load failed: {ex.Message}");
-            document = new TerminalWorkspaceDocument();
+            TerminalWorkspaceDocument document;
+            try
+            {
+                document = await _workspaceStore.LoadAsync();
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"workspace load failed: {ex.Message}");
+                document = new TerminalWorkspaceDocument();
+            }
+
+            // Primary window takes the selected (or first) saved window and
+            // spawns one MainWindow per remaining saved window.
+            window = document.Windows.FirstOrDefault(w => w.Id == document.SelectedWindowId)
+                ?? document.Windows.FirstOrDefault();
+            siblings = document.Windows.Where(w => !ReferenceEquals(w, window)).ToList();
         }
 
-        TerminalWorkspaceWindow? window = document.Windows.FirstOrDefault();
         if (window is null || window.Tabs.Count == 0)
         {
             await NewTabAsync(null);
@@ -1158,6 +1264,15 @@ public sealed class MainWindow : Window
         if (selected is not null)
         {
             UpdateStatus(selected);
+        }
+
+        // Open the other saved windows (primary window only).
+        foreach (TerminalWorkspaceWindow sibling in siblings)
+        {
+            if (sibling.Tabs.Count > 0)
+            {
+                new MainWindow(sibling, isPrimary: false).Show();
+            }
         }
     }
 
