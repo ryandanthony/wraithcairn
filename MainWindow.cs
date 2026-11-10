@@ -47,7 +47,7 @@ public sealed class MainWindow : Window
     private readonly TextBox _searchBox;
     private readonly Border _searchBar;
     private readonly ShellIntegration.LaunchSpec _shell = ShellIntegration.Resolve();
-    private double _fontSize = 13;
+    private double _fontSize = 11;
     private static int _paneCounter;
 
     private sealed class Tab
