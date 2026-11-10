@@ -123,6 +123,16 @@ export default function Home(): ReactNode {
       <HomepageHeader />
       <main>
         <HomepageFeatures />
+        <div className="container margin-bottom--lg">
+          <p className="text--center">
+            <em>
+              This project was developed 100% by AI, directed and reviewed
+              for behaviour by a human. The outcome took priority over code
+              quality: expect pragmatic, unpolished code rather than an
+              example of best practice.
+            </em>
+          </p>
+        </div>
       </main>
     </Layout>
   );

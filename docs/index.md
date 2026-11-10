@@ -5,6 +5,14 @@ title: What is Wraithcairn?
 
 # What is Wraithcairn?
 
+:::note
+This project was developed 100% by AI. Every line of code, the docs, and
+the build and release pipelines were written by AI coding agents,
+directed and reviewed for behaviour by a human. The goal was a working
+tool, so the outcome took priority over code quality: expect pragmatic,
+unpolished code rather than an example of best practice.
+:::
+
 Wraithcairn is a **cross-platform split-pane terminal** for Linux, Windows,
 and macOS, built with [Avalonia](https://avaloniaui.net/) on the
 [RoyalTerminal](https://www.nuget.org/packages/RoyalApps.RoyalTerminal.Avalonia)

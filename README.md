@@ -10,6 +10,13 @@ Instead of tabs, a window holds named **layouts** (a set of split panes) and
 shows one at a time. Each pane can start in its own folder and run its own
 program with arguments. Everything restores on the next launch.
 
+> [!NOTE]
+> **This project was developed 100% by AI.** Every line of code, the docs,
+> the build and release pipelines were written by AI coding agents, directed
+> and reviewed for behaviour by a human. The goal was a working tool I
+> actually wanted to use, so the outcome took priority over code quality:
+> expect pragmatic, unpolished code rather than an example of best practice.
+
 ## Build & run
 
 Requires the .NET 10 SDK.
