@@ -24,6 +24,9 @@ namespace SpikeRoyalTerminal;
 ///   Alt+Arrows          move focus between panes
 ///   Ctrl+Alt+Arrows     resize split          Ctrl+Shift+Z  zoom pane
 ///   Ctrl+Shift+=        equalize splits
+///   Ctrl+Shift+C / V    copy selection / paste
+///   Ctrl+Shift+F        find (Enter next, Shift+Enter prev, Esc close)
+///   Ctrl+Shift+K        clear scrollback
 ///   Ctrl+PgUp/PgDn      previous / next tab
 ///   Ctrl+Shift+PgUp/PgDn move tab left / right
 ///   Ctrl+= / Ctrl+-     font size
@@ -40,6 +43,8 @@ public sealed class MainWindow : Window
 
     private readonly TabControl _tabStrip;
     private readonly TextBlock _status;
+    private readonly TextBox _searchBox;
+    private readonly Border _searchBar;
     private readonly ShellIntegration.LaunchSpec _shell = ShellIntegration.Resolve();
     private double _fontSize = 13;
     private int _paneCounter;
@@ -111,9 +116,27 @@ public sealed class MainWindow : Window
             Foreground = Brushes.Gray,
         };
 
+        _searchBox = new TextBox
+        {
+            Watermark = "find…",
+            Width = 280,
+            FontSize = 12,
+        };
+        _searchBar = new Border
+        {
+            Child = _searchBox,
+            Padding = new Thickness(8, 4),
+            HorizontalAlignment = HorizontalAlignment.Right,
+            IsVisible = false,
+        };
+        _searchBox.KeyDown += OnSearchKey;
+        _searchBox.TextChanged += (_, _) => RunSearch(select: false);
+
         DockPanel root = new();
         DockPanel.SetDock(_status, Dock.Bottom);
+        DockPanel.SetDock(_searchBar, Dock.Top);
         root.Children.Add(_status);
+        root.Children.Add(_searchBar);
         root.Children.Add(_tabStrip);
         Content = root;
 
@@ -247,6 +270,13 @@ public sealed class MainWindow : Window
         bool sawEcho = screenText.Contains("spike-selftest-42");
         Console.WriteLine($"SELFTEST echo_output_visible={sawEcho}");
 
+        if (tab?.Active is { } searchControl)
+        {
+            searchControl.StartSearch("spike-selftest");
+            Console.WriteLine($"SELFTEST search_matches={searchControl.SearchTotal}");
+            searchControl.EndSearch();
+        }
+
         // Exercise split UX: resize, equalize, zoom toggle round-trip.
         if (tab is not null && tab.Nodes.Count > 1)
         {
@@ -357,6 +387,10 @@ public sealed class MainWindow : Window
         else if (ctrlShift && e.Key == Key.O) { _ = SplitAsync(TerminalPaneSplitOrientation.Horizontal); e.Handled = true; }
         else if (ctrlShift && e.Key == Key.E) { _ = SplitAsync(TerminalPaneSplitOrientation.Vertical); e.Handled = true; }
         else if (ctrlShift && e.Key == Key.Z) { ToggleZoom(); e.Handled = true; }
+        else if (ctrlShift && e.Key == Key.C && ActiveTab()?.Active is { HasSelection: true } sel) { _ = sel.CopySelectionAsync(); e.Handled = true; }
+        else if (ctrlShift && e.Key == Key.V && ActiveTab()?.Active is { } pasteTarget) { _ = pasteTarget.PasteAsync(); e.Handled = true; }
+        else if (ctrlShift && e.Key == Key.F) { OpenSearch(); e.Handled = true; }
+        else if (ctrlShift && e.Key == Key.K && ActiveTab()?.Active is { } clearTarget) { clearTarget.ClearScrollback(); e.Handled = true; }
         else if (ctrlShift && e.Key is Key.OemPlus or Key.Add) { EqualizeSplits(); e.Handled = true; }
         else if (ctrlShift && e.Key == Key.PageDown) { MoveTab(1); e.Handled = true; }
         else if (ctrlShift && e.Key == Key.PageUp) { MoveTab(-1); e.Handled = true; }
@@ -797,6 +831,68 @@ public sealed class MainWindow : Window
                     ? new SolidColorBrush(Color.Parse("#89b4fa"))
                     : Brushes.Transparent;
             }
+        }
+    }
+
+    // ----- search ----------------------------------------------------------
+
+    private void OpenSearch()
+    {
+        _searchBar.IsVisible = true;
+        _searchBox.SelectAll();
+        _searchBox.Focus();
+    }
+
+    private void CloseSearch()
+    {
+        _searchBar.IsVisible = false;
+        if (ActiveTab()?.Active is { } control)
+        {
+            control.EndSearch();
+            control.Focus();
+        }
+    }
+
+    private void RunSearch(bool select)
+    {
+        if (!_searchBar.IsVisible || ActiveTab()?.Active is not TerminalControl control)
+        {
+            return;
+        }
+
+        string needle = _searchBox.Text ?? string.Empty;
+        if (string.IsNullOrEmpty(needle))
+        {
+            control.EndSearch();
+            return;
+        }
+
+        control.StartSearch(needle);
+        if (select)
+        {
+            control.SelectNextSearchMatch();
+        }
+    }
+
+    private void OnSearchKey(object? sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Escape)
+        {
+            CloseSearch();
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Enter && ActiveTab()?.Active is { } control)
+        {
+            if (e.KeyModifiers.HasFlag(KeyModifiers.Shift))
+            {
+                control.SelectPreviousSearchMatch();
+            }
+            else if (!control.SelectNextSearchMatch())
+            {
+                RunSearch(select: true);
+            }
+
+            e.Handled = true;
         }
     }
 
