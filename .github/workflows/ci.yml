@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build (Release)
+        run: dotnet build -c Release --no-restore
+
+      - name: Selftest (headless, run 1 - save)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update && sudo apt-get install -y xvfb
+          OUTPUT=$(timeout 90 xvfb-run -a dotnet run -c Release --no-build -- --selftest 2>&1) || true
+          echo "$OUTPUT"
+          echo "$OUTPUT" | grep -q "SELFTEST echo_output_visible=True"
+          echo "$OUTPUT" | grep -q "SELFTEST ghostty=True"
+
+      - name: Selftest (headless, run 2 - restore)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          OUTPUT=$(timeout 90 xvfb-run -a dotnet run -c Release --no-build -- --selftest 2>&1) || true
+          echo "$OUTPUT"
+          echo "$OUTPUT" | grep -q "SELFTEST phase=restored"
