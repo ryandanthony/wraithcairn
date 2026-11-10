@@ -23,7 +23,9 @@ public static class ScrollbackStore
     private const string Separator =
         "\r\n\x1b[0m\x1b[2m--- restored scrollback ---\x1b[0m\r\n";
 
-    public static string Directory { get; } = Path.Combine(AppConfig.ConfigDir, "scrollback");
+    public static string Directory { get; } = NamedLayouts.ActiveName is { } layout
+        ? Path.Combine(AppConfig.ConfigDir, "scrollback", NamedLayouts.Sanitize(layout))
+        : Path.Combine(AppConfig.ConfigDir, "scrollback");
 
     private static string PathFor(string paneId) =>
         Path.Combine(Directory, SanitizeId(paneId) + ".vt");

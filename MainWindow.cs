@@ -34,10 +34,7 @@ namespace SpikeRoyalTerminal;
 /// </summary>
 public sealed class MainWindow : Window
 {
-    private static readonly string WorkspacePath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        "spike-royalterminal",
-        "workspace.json");
+    private static readonly string WorkspacePath = NamedLayouts.ActivePath;
 
     private readonly ITerminalWorkspaceStore _workspaceStore =
         TerminalWorkspaceStoreFactory.CreateDefault(WorkspacePath);
@@ -107,7 +104,9 @@ public sealed class MainWindow : Window
         _shell = ShellIntegration.Resolve(Config.Shell);
         Windows.Add(this);
         Activated += (_, _) => _lastFocused = this;
-        Title = "spike-royalterminal";
+        Title = NamedLayouts.ActiveName is { } layoutName
+            ? $"spike-royalterminal [{layoutName}]"
+            : "spike-royalterminal";
         Width = 1200;
         Height = 800;
         Background = Config.ResolvedTheme is { } chromeTheme
@@ -347,11 +346,16 @@ public sealed class MainWindow : Window
         view.Items.Add(Item("Smaller Text", Gesture(Key.OemMinus, KeyModifiers.Control),
             () => SetFontSize(_fontSize - 1)));
 
+        MenuItem layouts = new() { Header = "Layouts" };
+        layouts.SubmenuOpened += (_, _) => RebuildLayoutsMenu(layouts);
+        RebuildLayoutsMenu(layouts);
+
         Menu menu = new() { FontSize = 12 };
         menu.Items.Add(shell);
         menu.Items.Add(pane);
         menu.Items.Add(edit);
         menu.Items.Add(view);
+        menu.Items.Add(layouts);
 
         // Clicking the menu takes keyboard focus; hand it back to the active
         // pane afterwards (unless the action opened the find bar).
@@ -365,6 +369,93 @@ public sealed class MainWindow : Window
 
         _menu = menu;
         return menu;
+    }
+
+    // ----- named layouts ---------------------------------------------------
+
+    private void RebuildLayoutsMenu(MenuItem layouts)
+    {
+        layouts.Items.Clear();
+
+        MenuItem saveAs = new() { Header = "Save Layout As…" };
+        saveAs.Click += async (_, _) => await PromptSaveLayoutAsync();
+        layouts.Items.Add(saveAs);
+
+        IReadOnlyList<string> names = NamedLayouts.List();
+        layouts.Items.Add(new Separator());
+
+        if (names.Count == 0)
+        {
+            layouts.Items.Add(new MenuItem { Header = "(no saved layouts)", IsEnabled = false });
+        }
+
+        foreach (string name in names)
+        {
+            bool isActive = string.Equals(name, NamedLayouts.ActiveName, StringComparison.Ordinal);
+            MenuItem open = new() { Header = isActive ? $"{name}  (this window)" : $"Open \"{name}\"" };
+            open.IsEnabled = !isActive;
+            open.Click += (_, _) =>
+            {
+                SaveWorkspace(); // make sure the current layout is on disk first
+                NamedLayouts.Launch(name);
+            };
+            layouts.Items.Add(open);
+        }
+
+        if (names.Count > 0)
+        {
+            layouts.Items.Add(new Separator());
+            MenuItem delete = new() { Header = "Delete" };
+            foreach (string name in names)
+            {
+                MenuItem del = new() { Header = name };
+                del.Click += (_, _) => NamedLayouts.Delete(name);
+                delete.Items.Add(del);
+            }
+
+            layouts.Items.Add(delete);
+        }
+    }
+
+    private async Task PromptSaveLayoutAsync()
+    {
+        TextBox nameBox = new() { Watermark = "layout name", Width = 260 };
+        Button ok = new() { Content = "Save", IsDefault = true, Margin = new Thickness(8, 0, 0, 0) };
+        Button cancel = new() { Content = "Cancel", IsCancel = true, Margin = new Thickness(8, 0, 0, 0) };
+        StackPanel row = new() { Orientation = Orientation.Horizontal, Margin = new Thickness(12) };
+        row.Children.Add(nameBox);
+        row.Children.Add(ok);
+        row.Children.Add(cancel);
+
+        Window dialog = new()
+        {
+            Title = "Save Layout As",
+            Content = row,
+            SizeToContent = SizeToContent.WidthAndHeight,
+            CanResize = false,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Background = Background,
+        };
+
+        string? result = null;
+        ok.Click += (_, _) =>
+        {
+            result = nameBox.Text;
+            dialog.Close();
+        };
+        cancel.Click += (_, _) => dialog.Close();
+        dialog.Opened += (_, _) => nameBox.Focus();
+
+        await dialog.ShowDialog(this);
+
+        if (!string.IsNullOrWhiteSpace(result))
+        {
+            SaveWorkspace();
+            string path = NamedLayouts.SaveAs(result);
+            _status.Text = $"saved layout \"{result}\" -> {path}   (open it later from Layouts, or run with --workspace {NamedLayouts.Sanitize(result)})";
+        }
+
+        ActiveTab()?.Active?.Focus();
     }
 
     // ----- self test --------------------------------------------------------
@@ -500,6 +591,16 @@ public sealed class MainWindow : Window
 
         SaveWorkspace();
         Console.WriteLine($"SELFTEST workspace={WorkspacePath} exists={File.Exists(WorkspacePath)}");
+
+        if (!restored && NamedLayouts.ActiveName is null)
+        {
+            const string probe = "selftest-probe";
+            NamedLayouts.SaveAs(probe);
+            bool listed = NamedLayouts.List().Contains(probe);
+            NamedLayouts.Delete(probe);
+            bool removed = !NamedLayouts.List().Contains(probe);
+            Console.WriteLine($"SELFTEST named_layout_saved={listed} deleted={removed}");
+        }
         _shuttingDown = true;
         foreach (MainWindow window in Windows.ToArray())
         {
