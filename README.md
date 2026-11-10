@@ -115,13 +115,24 @@ Saved 5 s after layout changes, on window close, and on exit/SIGTERM/SIGINT.
 
 All of these are also in the menu bar (Shell, Pane, Edit, View, Layouts).
 
+## Pane header bar
+
+Each pane has a narrow bar on top with its title and context: current
+folder, the running command (`▶`), a failed exit code (`✗`), and the
+configured startup program (`⚙`). Drag the bar onto another pane to swap
+the two (Esc cancels). Click to focus, double-click to zoom, right-click for
+the pane menu.
+
 ## Self-test
 
 `--selftest` builds a layout, checks the Ghostty engine, GPU, search,
-splits, layout switching and save/open, saves, and exits. A second run
-checks restore. Output is `SELFTEST key=value` lines. CI runs it twice
-headless (see `.github/workflows/ci.yml`). Note: it overwrites
-`workspace.json`.
+splits, header bars, pane swap (including a synthetic header drag), layout
+switching and save/open, saves, and exits. A second run checks restore.
+Output is `SELFTEST key=value` lines. CI runs it twice headless (see
+`.github/workflows/ci.yml`). It overwrites `workspace.json`, so locally use
+`scripts/selftest-isolated.sh [runs] [restore]`, which points
+`XDG_CONFIG_HOME` at a throwaway copy of your config.
+`WRAITHCAIRN_TRACE=1` prints shell-integration events.
 
 `--dump-panes` restores the layout, prints each pane's startup, cwd and
 last screen lines, and exits without saving.

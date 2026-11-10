@@ -28,6 +28,32 @@ The new pane starts as a plain shell unless you configure its startup (see
 - `Ctrl+Shift+=` equalizes every split ratio in the current layout back to
   even
 
+## Pane Header Bar
+
+Every pane has a narrow bar along its top edge showing:
+
+- **Title**: the title the program set (for example vim or htop), or
+  the folder name when nothing set one
+- **Folder**: the pane's current directory, shortened with `~`
+- **Running command**: `▶ npm run dev` while a command runs (needs
+  [shell integration](/docs/guides/shell-integration))
+- **Last exit code**: `✗ 2` when the last command failed, or
+  `■ exited 0` when a directly-run program has exited
+- **Startup program**: `⚙ npm run dev` when the pane has a configured
+  [startup](/docs/guides/per-pane-startup)
+
+The focused pane's bar is highlighted.
+
+### Moving Panes
+
+Drag a pane's header bar onto another pane to **swap** them. The
+drop target is outlined while you drag, and `Esc` cancels. Each pane keeps
+its process, scrollback and startup settings, and split sizes stay with
+their positions, so a swap only moves where the panes are.
+
+Clicking the bar focuses the pane, double-clicking it toggles zoom, and
+right-clicking opens the pane menu.
+
 ## Zooming
 
 `Ctrl+Shift+Z` zooms the focused pane to temporarily fill the whole

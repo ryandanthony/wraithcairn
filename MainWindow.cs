@@ -87,6 +87,38 @@ public sealed class MainWindow : Window
 
     private readonly List<Tab> _tabs = [];
     private Tab? _activeTab;
+
+    /// <summary>
+    /// Per-pane chrome and live context shown in the pane's header bar.
+    /// </summary>
+    private sealed class PaneInfo
+    {
+        public required PaneHeader Header { get; init; }
+        public required Border Frame { get; init; }
+
+        /// <summary>Title the program set via OSC 0/2, if any.</summary>
+        public string? OscTitle { get; set; }
+
+        /// <summary>Command currently running (OSC 133 C), null at a prompt.</summary>
+        public string? RunningCommand { get; set; }
+
+        /// <summary>Exit code of the last finished command (OSC 133 D).</summary>
+        public int? LastExitCode { get; set; }
+
+        /// <summary>Exec-mode program exited; pane kept open.</summary>
+        public bool ProcessExited { get; set; }
+
+        /// <summary>The shell has shown at least one prompt.</summary>
+        public bool PromptSeen { get; set; }
+    }
+
+    private readonly Dictionary<TerminalControl, PaneInfo> _panes = [];
+
+    /// <summary>Pane whose header is being dragged, and the pane under the pointer.</summary>
+    private TerminalControl? _dragSource;
+    private TerminalControl? _dragTarget;
+    private static readonly IBrush DropTargetBrush = new SolidColorBrush(Color.Parse("#f9a825"));
+    private static readonly IBrush FocusBrush = new SolidColorBrush(Color.Parse("#89b4fa"));
     private readonly DispatcherTimer _autosave;
     private System.Runtime.InteropServices.PosixSignalRegistration? _sigterm;
     private bool _layoutDirty;
@@ -689,8 +721,35 @@ public sealed class MainWindow : Window
         }
 
         Tab? tab = ActiveTab();
-        tab?.Active?.SendInput("echo wraithcairn-selftest-$((6*7))\n");
-        await Task.Delay(2500);
+        if (tab?.Active is { } typed)
+        {
+            // Wait for the shell's first prompt, as a person would.
+            for (int i = 0; i < 50 && !(_panes.TryGetValue(typed, out PaneInfo? ready) && ready.PromptSeen); i++)
+            {
+                await Task.Delay(100);
+            }
+
+            // Unique per run: bash's history dedupe would hide a repeated line.
+            typed.SendInput($"sleep 3; echo wraithcairn-selftest-$((6*7)) # {Guid.NewGuid():N}\n");
+        }
+
+        await Task.Delay(300);
+        PaneInfo? probeInfo = tab?.Active is { } probePane && _panes.TryGetValue(probePane, out PaneInfo? pinfo) ? pinfo : null;
+        string? runningSeen = null;
+        for (int i = 0; i < 50 && runningSeen is null; i++)
+        {
+            runningSeen = probeInfo?.RunningCommand;
+            await Task.Delay(100);
+        }
+
+        string? runningAfter = probeInfo?.RunningCommand;
+        for (int i = 0; i < 80 && runningAfter is not null; i++)
+        {
+            await Task.Delay(100);
+            runningAfter = probeInfo?.RunningCommand;
+        }
+
+        await Task.Delay(300);
 
         string phase = restored ? "restored" : "initial";
         Console.WriteLine($"SELFTEST phase={phase}");
@@ -748,6 +807,12 @@ public sealed class MainWindow : Window
             bool secondAlive = second.Nodes.Keys.All(c => c.HasActiveSession);
             Console.WriteLine($"SELFTEST layout_switch={showsSecond && showsFirst} background_alive={firstAlive && secondAlive}");
             Console.WriteLine($"SELFTEST layout_names={string.Join(",", _tabs.Select(t => t.Name))}");
+
+            // Back to the layout under test (after restore it may not be _tabs[0]).
+            if (tab is not null)
+            {
+                SwitchToLayout(tab);
+            }
         }
 
         // Exercise split UX: resize, equalize, zoom toggle round-trip.
@@ -767,6 +832,44 @@ public sealed class MainWindow : Window
             ToggleZoom();
             bool zoomedOut = tab.Zoom is null;
             Console.WriteLine($"SELFTEST zoom_roundtrip={zoomedIn && zoomedOut}");
+
+            // Pane header bars: one per pane, showing a title.
+            bool headersOk = tab.Nodes.Keys.All(c => _panes.TryGetValue(c, out PaneInfo? pi)
+                && pi.Header.IsVisible && pi.Header.TitleText.Length > 0);
+            if (tab.Active is { } headed && _panes.TryGetValue(headed, out PaneInfo? hi))
+            {
+                Console.WriteLine($"SELFTEST header_text={hi.Header.DisplayText}");
+            }
+
+            Console.WriteLine($"SELFTEST headers={headersOk} count={tab.Nodes.Count(n => _panes.ContainsKey(n.Key))}");
+            Console.WriteLine($"SELFTEST header_running={runningSeen?.StartsWith("sleep", StringComparison.Ordinal) == true} idle_after={runningAfter is null}");
+            int phantoms = tab.Nodes.Keys.Count(c => !ReferenceEquals(c, tab.Active)
+                && _panes.TryGetValue(c, out PaneInfo? pi) && pi.RunningCommand is not null);
+            Console.WriteLine($"SELFTEST idle_panes_clean={phantoms == 0}");
+
+            // Swap (what a header drag does): first two leaves trade places,
+            // then swap back so the saved layout is unchanged.
+            IReadOnlyList<TerminalControl> order = TerminalPaneLayout.CollectLeafControls(tab.Root);
+            if (order.Count >= 2)
+            {
+                TerminalControl x = order[0], y = order[^1];
+                bool swapped = SwapPanes(x, y);
+                IReadOnlyList<TerminalControl> after = TerminalPaneLayout.CollectLeafControls(tab.Root);
+                bool moved = ReferenceEquals(after[0], y) && ReferenceEquals(after[^1], x);
+                await Task.Delay(200);
+                bool aliveAfter = x.HasActiveSession && y.HasActiveSession;
+                bool back = SwapPanes(x, y);
+                IReadOnlyList<TerminalControl> restoredOrder = TerminalPaneLayout.CollectLeafControls(tab.Root);
+                bool roundTrip = restoredOrder.SequenceEqual(order);
+                Console.WriteLine($"SELFTEST pane_swap={swapped && moved && back && roundTrip} alive={aliveAfter}");
+
+                // Real gesture: press on x's header, move onto y's pane, release.
+                bool dragged = SimulateHeaderDrag(x, y);
+                IReadOnlyList<TerminalControl> dragOrder = TerminalPaneLayout.CollectLeafControls(tab.Root);
+                bool dragMoved = ReferenceEquals(dragOrder[0], y) && ReferenceEquals(dragOrder[^1], x);
+                SwapPanes(x, y); // put it back
+                Console.WriteLine($"SELFTEST header_drag_swap={dragged && dragMoved} order_restored={TerminalPaneLayout.CollectLeafControls(tab.Root).SequenceEqual(order)}");
+            }
         }
 
         // Multi-window: first phase opens a second window with one tab;
@@ -987,6 +1090,8 @@ public sealed class MainWindow : Window
         bool ctrl = e.KeyModifiers.HasFlag(KeyModifiers.Control);
         bool alt = e.KeyModifiers.HasFlag(KeyModifiers.Alt);
 
+        if (_dragSource is not null && e.Key == Key.Escape) { CancelPaneDrag(); e.Handled = true; return; }
+
         if (ctrlShift && e.Key == Key.T) { _ = NewTabAsync(null); e.Handled = true; }
         else if (ctrlShift && e.Key == Key.W) { ClosePane(); e.Handled = true; }
         else if (ctrlShift && e.Key == Key.O) { _ = SplitAsync(TerminalPaneSplitOrientation.Horizontal); e.Handled = true; }
@@ -1079,6 +1184,12 @@ public sealed class MainWindow : Window
 
         terminal.TitleChanged += (_, title) => Dispatcher.UIThread.Post(() =>
         {
+            if (_panes.TryGetValue(terminal, out PaneInfo? info))
+            {
+                info.OscTitle = string.IsNullOrWhiteSpace(title) ? null : title.Trim();
+                UpdateHeader(terminal);
+            }
+
             Tab? tab = FindTab(terminal);
             if (tab is not null && ReferenceEquals(tab.Active, terminal)
                 && !string.IsNullOrWhiteSpace(title))
@@ -1094,8 +1205,50 @@ public sealed class MainWindow : Window
 
         terminal.ShellIntegrationEventReceived += (_, args) =>
         {
-            if (args.Value.Kind == TerminalShellIntegrationEventKind.WorkingDirectoryChanged
-                && args.Value.WorkingDirectory is { Length: > 0 } cwd)
+            TerminalShellIntegrationEvent ev = args.Value;
+            if (Environment.GetEnvironmentVariable("WRAITHCAIRN_TRACE") == "1")
+            {
+                Console.WriteLine($"TRACE {DateTime.Now:HH:mm:ss.fff} ev={ev.Kind} cmd={ev.CommandLine} exit={ev.ExitCode}");
+            }
+            if (ev.Kind is TerminalShellIntegrationEventKind.OutputStarted
+                or TerminalShellIntegrationEventKind.CommandFinished
+                or TerminalShellIntegrationEventKind.FreshLineNewPrompt)
+            {
+                Dispatcher.UIThread.Post(() =>
+                {
+                    if (_panes.TryGetValue(terminal, out PaneInfo? info))
+                    {
+                        if (ev.Kind == TerminalShellIntegrationEventKind.OutputStarted)
+                        {
+                            // Prompt frameworks (starship etc.) and the integration
+                            // itself run helpers through the DEBUG trap; skip them.
+                            if (IsUserCommand(ev.CommandLine))
+                            {
+                                info.RunningCommand = ev.CommandLine!.Trim();
+                            }
+                        }
+                        else if (ev.Kind == TerminalShellIntegrationEventKind.FreshLineNewPrompt)
+                        {
+                            info.PromptSeen = true;
+                            info.RunningCommand = null;
+                        }
+                        else
+                        {
+                            if (info.RunningCommand is not null)
+                            {
+                                info.LastExitCode = ev.ExitCode;
+                            }
+
+                            info.RunningCommand = null;
+                        }
+
+                        UpdateHeader(terminal);
+                    }
+                });
+            }
+
+            if (ev.Kind == TerminalShellIntegrationEventKind.WorkingDirectoryChanged
+                && ev.WorkingDirectory is { Length: > 0 } cwd)
             {
                 Dispatcher.UIThread.Post(() =>
                 {
@@ -1103,6 +1256,7 @@ public sealed class MainWindow : Window
                     if (tab is not null && tab.Nodes.TryGetValue(terminal, out TerminalPaneNode? node))
                     {
                         node.SetWorkingDirectory(NormalizeCwd(cwd));
+                        UpdateHeader(terminal, node);
                         MarkLayoutDirty();
                         if (ReferenceEquals(tab.Active, terminal))
                         {
@@ -1138,6 +1292,14 @@ public sealed class MainWindow : Window
             && Startups.TryGetValue(node.Id, out PaneStartup? startup)
             && startup.IsExec)
         {
+            if (_panes.TryGetValue(terminal, out PaneInfo? info))
+            {
+                info.ProcessExited = true;
+                info.RunningCommand = null;
+                info.LastExitCode = exitCode;
+                UpdateHeader(terminal, node);
+            }
+
             terminal.WriteOutput(System.Text.Encoding.UTF8.GetBytes(
                 $"\r\n\x1b[0m\x1b[2m[{startup.Command} exited with code {exitCode}. "
                 + "Ctrl+Shift+R to restart, Ctrl+Shift+W to close]\x1b[0m\r\n"));
@@ -1205,7 +1367,17 @@ public sealed class MainWindow : Window
             terminal.StopPty();
         }
 
+        if (_panes.TryGetValue(terminal, out PaneInfo? info))
+        {
+            info.ProcessExited = false;
+            info.RunningCommand = null;
+            info.LastExitCode = null;
+            info.OscTitle = null;
+            info.PromptSeen = false;
+        }
+
         await StartSessionAsync(terminal, node.WorkingDirectory, preserveScrollback: true, StartupFor(node));
+        UpdateHeader(terminal, node);
         terminal.Focus();
     }
 
@@ -1223,14 +1395,45 @@ public sealed class MainWindow : Window
             id: id ?? $"pane-{++_paneCounter}",
             workingDirectory: cwd,
             transportId: TerminalTransportIds.Pty);
+
+        Color background = Config.ResolvedTheme is { } theme
+            ? Color.FromUInt32(theme.DefaultBackground)
+            : Color.Parse("#1e1e2e");
+        Color foreground = Config.ResolvedTheme is { } fgTheme
+            ? Color.FromUInt32(fgTheme.DefaultForeground)
+            : Color.Parse("#cdd6f4");
+        PaneHeader header = new(background, foreground);
+        DockPanel.SetDock(header, Dock.Top);
+
+        DockPanel body = new();
+        body.Children.Add(header);
+        body.Children.Add(TerminalPaneLayout.CreatePaneScrollViewer(terminal));
+
         Border paneBorder = new()
         {
-            Child = TerminalPaneLayout.CreatePaneScrollViewer(terminal),
+            Child = body,
             BorderThickness = new Thickness(1),
             BorderBrush = Brushes.Transparent,
         };
         paneBorder.ContextMenu = BuildPaneContextMenu(terminal);
         node.SetLeaf(terminal, paneBorder);
+
+        _panes[terminal] = new PaneInfo { Header = header, Frame = paneBorder };
+        header.Clicked += () => terminal.Focus();
+        header.DoubleClicked += () =>
+        {
+            terminal.Focus();
+            ToggleZoom();
+        };
+        header.DragStarted += () =>
+        {
+            terminal.Focus();
+            _dragSource = terminal;
+            _dragTarget = null;
+        };
+        header.DragMoved += point => UpdateDropTarget(point);
+        header.DragEnded += point => EndPaneDrag(point);
+        UpdateHeader(terminal, node);
         return node;
     }
 
@@ -1291,6 +1494,7 @@ public sealed class MainWindow : Window
         MarkLayoutDirty();
         SaveWorkspace();
         UpdateStatus(tab);
+        UpdateHeader(terminal, node);
 
         if (dialog.ApplyNow)
         {
@@ -1396,6 +1600,7 @@ public sealed class MainWindow : Window
         foreach (TerminalControl control in tab.Nodes.Keys.ToArray())
         {
             StopQuietly(control);
+            _panes.Remove(control);
         }
 
         int index = _tabs.IndexOf(tab);
@@ -1513,6 +1718,7 @@ public sealed class MainWindow : Window
 
         StopQuietly(control);
         tab.Nodes.Remove(control);
+        _panes.Remove(control);
 
         // Promote the sibling into the parent's slot.
         TerminalPaneNode? grandparent = parent.Parent;
@@ -1584,18 +1790,274 @@ public sealed class MainWindow : Window
         UpdateWindowTitle(tab);
     }
 
-    private static void UpdateFocusBorders(Tab tab)
+    private void UpdateFocusBorders(Tab tab)
     {
         bool multiplePanes = tab.Nodes.Count > 1;
         foreach ((TerminalControl control, TerminalPaneNode node) in tab.Nodes)
         {
+            bool active = ReferenceEquals(control, tab.Active);
             if (node.LeafContainer is Border border)
             {
-                border.BorderBrush = multiplePanes && ReferenceEquals(control, tab.Active)
-                    ? new SolidColorBrush(Color.Parse("#89b4fa"))
-                    : Brushes.Transparent;
+                border.BorderBrush = ReferenceEquals(control, _dragTarget)
+                    ? DropTargetBrush
+                    : multiplePanes && active ? FocusBrush : Brushes.Transparent;
+            }
+
+            if (_panes.TryGetValue(control, out PaneInfo? info))
+            {
+                info.Header.SetActive(multiplePanes && active);
             }
         }
+    }
+
+    // ----- pane header bar -------------------------------------------------
+
+    /// <summary>Refreshes the title + context text in a pane's header bar.</summary>
+    private void UpdateHeader(TerminalControl terminal, TerminalPaneNode? node = null)
+    {
+        if (!_panes.TryGetValue(terminal, out PaneInfo? info))
+        {
+            return;
+        }
+
+        if (node is null && FindTab(terminal) is { } tab)
+        {
+            tab.Nodes.TryGetValue(terminal, out node);
+        }
+
+        string cwd = TildePath(node?.WorkingDirectory);
+        PaneStartup? startup = node is null ? null : StartupFor(node);
+
+        string title = info.OscTitle is { Length: > 0 } osc
+            ? Shorten(osc, 60)
+            : CwdBasename(node?.WorkingDirectory);
+
+        List<string> context = [];
+        if (!title.Contains(cwd, StringComparison.Ordinal))
+        {
+            context.Add(cwd);
+        }
+
+        if (info.RunningCommand is { } running)
+        {
+            context.Add($"\u25b6 {Shorten(running, 60)}");
+        }
+        else if (info.ProcessExited)
+        {
+            context.Add($"\u25a0 exited {info.LastExitCode}");
+        }
+        else if (info.LastExitCode is int code && code != 0)
+        {
+            context.Add($"\u2717 {code}");
+        }
+
+        if (startup is { HasCommand: true } su)
+        {
+            string line = $"{su.Command} {string.Join(' ', su.Args)}".Trim();
+            context.Add($"\u2699 {Shorten(line, 40)}{(su.IsExec ? " (exec)" : string.Empty)}");
+        }
+
+        info.Header.SetContent(title, string.Join("  \u00b7  ", context));
+    }
+
+    /// <summary>
+    /// Selftest helper: raises real pointer press/move/release events on a
+    /// pane's header bar, ending over the centre of another pane.
+    /// </summary>
+    private bool SimulateHeaderDrag(TerminalControl source, TerminalControl target)
+    {
+        if (!_panes.TryGetValue(source, out PaneInfo? from)
+            || !_panes.TryGetValue(target, out PaneInfo? to)
+            || from.Header.TranslatePoint(new Point(20, 6), this) is not Point start
+            || to.Frame.TranslatePoint(new Point(to.Frame.Bounds.Width / 2, to.Frame.Bounds.Height / 2), this) is not Point end)
+        {
+            return false;
+        }
+
+        Pointer pointer = new(Pointer.GetNextFreeId(), PointerType.Mouse, isPrimary: true);
+        PointerPointProperties down = new(RawInputModifiers.LeftMouseButton, PointerUpdateKind.LeftButtonPressed);
+        PointerPointProperties drag = new(RawInputModifiers.LeftMouseButton, PointerUpdateKind.Other);
+        PointerPointProperties up = new(RawInputModifiers.None, PointerUpdateKind.LeftButtonReleased);
+        ulong ts = 0;
+
+        from.Header.RaiseEvent(new PointerPressedEventArgs(
+            from.Header, pointer, this, start, ++ts, down, KeyModifiers.None));
+        for (int i = 1; i <= 5; i++)
+        {
+            Point p = start + ((end - start) * (i / 5.0));
+            from.Header.RaiseEvent(new PointerEventArgs(
+                InputElement.PointerMovedEvent, from.Header, pointer, this, p, ++ts, drag, KeyModifiers.None));
+        }
+
+        bool targeted = ReferenceEquals(_dragTarget, target);
+        from.Header.RaiseEvent(new PointerReleasedEventArgs(
+            from.Header, pointer, this, end, ++ts, up, KeyModifiers.None, MouseButton.Left));
+        return targeted && _dragSource is null;
+    }
+
+    private static bool IsUserCommand(string? commandLine)
+    {
+        if (string.IsNullOrWhiteSpace(commandLine))
+        {
+            return false;
+        }
+
+        string cmd = commandLine.Trim();
+        return cmd is not ("true" or ":")
+            && !cmd.StartsWith("__", StringComparison.Ordinal)
+            && !cmd.StartsWith("starship_", StringComparison.Ordinal)
+            && !cmd.StartsWith("_omp_", StringComparison.Ordinal);
+    }
+
+    private static string TildePath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return "~";
+        }
+
+        string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        string trimmed = Path.TrimEndingDirectorySeparator(path);
+        if (string.Equals(trimmed, home, StringComparison.Ordinal))
+        {
+            return "~";
+        }
+
+        return trimmed.StartsWith(home + Path.DirectorySeparatorChar, StringComparison.Ordinal)
+            ? "~" + trimmed[home.Length..]
+            : trimmed;
+    }
+
+    /// <summary>The pane in the shown layout whose frame contains a window point.</summary>
+    private TerminalControl? PaneAt(Point windowPoint)
+    {
+        if (ActiveTab() is not { } tab)
+        {
+            return null;
+        }
+
+        foreach ((TerminalControl control, TerminalPaneNode node) in tab.Nodes)
+        {
+            if (node.LeafContainer is not { IsVisible: true } container
+                || container.TranslatePoint(default, this) is not Point origin)
+            {
+                continue;
+            }
+
+            if (new Rect(origin, container.Bounds.Size).Contains(windowPoint))
+            {
+                return control;
+            }
+        }
+
+        return null;
+    }
+
+    private void UpdateDropTarget(Point windowPoint)
+    {
+        if (_dragSource is null || ActiveTab() is not { } tab)
+        {
+            return;
+        }
+
+        TerminalControl? over = PaneAt(windowPoint);
+        TerminalControl? target = ReferenceEquals(over, _dragSource) ? null : over;
+        if (!ReferenceEquals(target, _dragTarget))
+        {
+            _dragTarget = target;
+            UpdateFocusBorders(tab);
+            _status.Text = target is not null && _panes.TryGetValue(target, out PaneInfo? info)
+                ? $"drop to swap with \"{info.Header.TitleText}\"   (Esc cancels)"
+                : "drag onto another pane to swap   (Esc cancels)";
+        }
+    }
+
+    private void EndPaneDrag(Point? windowPoint)
+    {
+        TerminalControl? source = _dragSource;
+        if (windowPoint is Point point)
+        {
+            UpdateDropTarget(point);
+        }
+
+        TerminalControl? target = windowPoint is null ? null : _dragTarget;
+        _dragSource = null;
+        _dragTarget = null;
+
+        if (source is not null && target is not null)
+        {
+            SwapPanes(source, target);
+        }
+
+        if (ActiveTab() is { } tab)
+        {
+            UpdateFocusBorders(tab);
+            UpdateStatus(tab);
+        }
+
+        source?.Focus();
+    }
+
+    private void CancelPaneDrag()
+    {
+        if (_dragSource is { } source && _panes.TryGetValue(source, out PaneInfo? info))
+        {
+            info.Header.CancelDrag();
+        }
+    }
+
+    /// <summary>
+    /// Swaps two panes' positions in the layout tree. Each pane keeps its id,
+    /// process, scrollback and startup config; the split sizes stay with the
+    /// positions.
+    /// </summary>
+    private bool SwapPanes(TerminalControl a, TerminalControl b)
+    {
+        if (ReferenceEquals(a, b)
+            || FindTab(a) is not { } tab
+            || !ReferenceEquals(FindTab(b), tab)
+            || !tab.Nodes.TryGetValue(a, out TerminalPaneNode? nodeA)
+            || !tab.Nodes.TryGetValue(b, out TerminalPaneNode? nodeB)
+            || nodeA.Parent is not { SplitGrid: Grid gridA } parentA
+            || nodeB.Parent is not { SplitGrid: Grid gridB } parentB)
+        {
+            return false;
+        }
+
+        if (tab.Zoom is not null)
+        {
+            TerminalControl? keep = tab.Active;
+            ToggleZoom();
+            tab.Active = keep;
+        }
+
+        Control visualA = nodeA.Visual;
+        Control visualB = nodeB.Visual;
+        (int rowA, int colA) = (Grid.GetRow(visualA), Grid.GetColumn(visualA));
+        (int rowB, int colB) = (Grid.GetRow(visualB), Grid.GetColumn(visualB));
+        bool aIsFirst = ReferenceEquals(parentA.First, nodeA);
+        bool bIsFirst = ReferenceEquals(parentB.First, nodeB);
+
+        gridA.Children.Remove(visualA);
+        gridB.Children.Remove(visualB);
+
+        // Tree links.
+        if (aIsFirst) { parentA.First = nodeB; } else { parentA.Second = nodeB; }
+        if (bIsFirst) { parentB.First = nodeA; } else { parentB.Second = nodeA; }
+        nodeA.Parent = parentB;
+        nodeB.Parent = parentA;
+
+        // Visuals into each other's grid slots.
+        Grid.SetRow(visualB, rowA);
+        Grid.SetColumn(visualB, colA);
+        Grid.SetRow(visualA, rowB);
+        Grid.SetColumn(visualA, colB);
+        gridA.Children.Add(visualB);
+        gridB.Children.Add(visualA);
+
+        UpdateFocusBorders(tab);
+        MarkLayoutDirty();
+        return true;
     }
 
     // ----- search ----------------------------------------------------------

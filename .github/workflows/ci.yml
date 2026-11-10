@@ -35,6 +35,10 @@ jobs:
           echo "$OUTPUT"
           echo "$OUTPUT" | grep -q "SELFTEST echo_output_visible=True"
           echo "$OUTPUT" | grep -q "SELFTEST ghostty=True"
+          echo "$OUTPUT" | grep -q "SELFTEST headers=True"
+          echo "$OUTPUT" | grep -q "SELFTEST header_running=True idle_after=True"
+          echo "$OUTPUT" | grep -q "SELFTEST pane_swap=True alive=True"
+          echo "$OUTPUT" | grep -q "SELFTEST header_drag_swap=True order_restored=True"
 
       - name: Selftest (headless, run 2 - restore)
         if: matrix.os == 'ubuntu-latest'
@@ -42,6 +46,8 @@ jobs:
           OUTPUT=$(timeout 90 xvfb-run -a dotnet run -c Release --no-build -- --selftest 2>&1) || true
           echo "$OUTPUT"
           echo "$OUTPUT" | grep -q "SELFTEST phase=restored"
+          echo "$OUTPUT" | grep -q "SELFTEST zoom_roundtrip=True"
+          echo "$OUTPUT" | grep -q "SELFTEST header_drag_swap=True order_restored=True"
 
       # Releases ship single-file executables; make sure that packaging still
       # finds libghostty-vt and can spawn a PTY.

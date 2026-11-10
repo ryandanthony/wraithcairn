@@ -66,13 +66,42 @@ public static class ShellIntegration
         string path = WriteFile("bashrc",
             "[ -f /etc/bash.bashrc ] && source /etc/bash.bashrc\n" +
             "[ -f \"$HOME/.bashrc\" ] && source \"$HOME/.bashrc\"\n\n" +
-            script + "\n");
+            script + "\n" + BashHistorySync);
         return new LaunchSpec(
             new TerminalCommandSpec(shell, ["--rcfile", path]),
             null,
             "bash",
             Integrated: true);
     }
+
+    /// <summary>
+    /// The upstream bash snippet detects a new command (OSC 133 C) when the
+    /// DEBUG trap sees a history entry it has not reported yet. Other
+    /// PROMPT_COMMAND hooks (starship, etc.) also trip the DEBUG trap, so at a
+    /// new shell's first prompt it reports the previous session's last
+    /// history line as "running", which also swallows the next real
+    /// command's 133 C and reports that one after it finished. Marking the
+    /// current history entry as seen at every prompt makes only commands
+    /// entered at this prompt count.
+    /// </summary>
+    private const string BashHistorySync = """
+        __wraithcairn_sync_history() {
+          local line
+          line="$(HISTTIMEFORMAT= history 1 2>/dev/null)" || line=""
+          line="${line#"${line%%[![:space:]]*}"}"
+          __ROYALTERMINAL_LAST_HISTORY_ID="${line%%[[:space:]]*}"
+        }
+        if declare -F __royalterminal_prompt_command >/dev/null; then
+          eval "__wraithcairn_upstream_prompt_command() $(declare -f __royalterminal_prompt_command | tail -n +2)"
+          __royalterminal_prompt_command() {
+            local rc=$?
+            __wraithcairn_sync_history
+            (exit "$rc")
+            __wraithcairn_upstream_prompt_command
+          }
+        fi
+
+        """;
 
     private static LaunchSpec ResolveZsh(string shell)
     {

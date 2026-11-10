@@ -33,6 +33,15 @@ Every shortcut below is also available from the menu bar (**Shell**,
 | `Ctrl+=` | Bigger text |
 | `Ctrl+-` | Smaller text |
 
+## Mouse
+
+| Action | Effect |
+|--------|--------|
+| Drag a pane's header bar onto another pane | Swap the two panes (`Esc` cancels) |
+| Click a header bar | Focus that pane |
+| Double-click a header bar | Zoom / unzoom that pane |
+| Right-click a pane or its header | Pane menu |
+
 ## See Also
 
 - [Layouts](/docs/guides/layouts)
