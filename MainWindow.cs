@@ -47,8 +47,9 @@ public sealed class MainWindow : Window
     private readonly TextBox _searchBox;
     private readonly Border _searchBar;
     private Menu? _menu;
-    private readonly ShellIntegration.LaunchSpec _shell = ShellIntegration.Resolve();
-    private double _fontSize = 11;
+    private readonly ShellIntegration.LaunchSpec _shell;
+    private static readonly AppConfig Config = AppConfig.Load();
+    private double _fontSize = Config.FontSize;
     private static int _paneCounter;
 
     private sealed class Tab
@@ -102,12 +103,15 @@ public sealed class MainWindow : Window
     {
         _pendingRestore = restore;
         _isPrimary = isPrimary;
+        _shell = ShellIntegration.Resolve(Config.Shell);
         Windows.Add(this);
         Activated += (_, _) => _lastFocused = this;
         Title = "spike-royalterminal";
         Width = 1200;
         Height = 800;
-        Background = new SolidColorBrush(Color.Parse("#1e1e2e"));
+        Background = Config.ResolvedTheme is { } chromeTheme
+            ? new SolidColorBrush(Color.FromUInt32(chromeTheme.DefaultBackground))
+            : new SolidColorBrush(Color.Parse("#1e1e2e"));
 
         _tabStrip = new TabControl
         {
@@ -393,6 +397,13 @@ public sealed class MainWindow : Window
         Console.WriteLine($"SELFTEST ghostty={RoyalTerminal.Terminal.GhosttyVtProcessor.IsAvailable()}");
         Console.WriteLine($"SELFTEST gpu_gl={IsGpuCompositing()}");
         Console.WriteLine($"SELFTEST shell={_shell.ShellName} integrated={_shell.Integrated}");
+        Console.WriteLine($"SELFTEST config font={Config.FontFamily ?? "(default)"} size={Config.FontSize} "
+            + $"theme={Config.Theme ?? "(none)"} copyOnSelect={Config.CopyOnSelect}");
+        Console.WriteLine($"SELFTEST config_sources={string.Join(" | ", Config.Sources)}");
+        if (tab?.Active is { } themed)
+        {
+            Console.WriteLine($"SELFTEST pane_font={themed.FontFamilyName} size={themed.TerminalFontSize}");
+        }
         Console.WriteLine($"SELFTEST tabs={_tabs.Count}");
         for (int i = 0; i < _tabs.Count; i++)
         {
@@ -630,6 +641,27 @@ public sealed class MainWindow : Window
             ScrollbackLimit = 10_000,
             TerminalFontSize = _fontSize,
         };
+
+        if (!string.IsNullOrWhiteSpace(Config.FontFamily))
+        {
+            terminal.FontFamilyName = Config.FontFamily;
+        }
+
+        if (Config.ResolvedTheme is { } theme)
+        {
+            terminal.ApplyTheme(theme);
+        }
+
+        if (Config.CopyOnSelect)
+        {
+            terminal.SelectionFinalized += (_, _) =>
+            {
+                if (terminal.HasSelection)
+                {
+                    _ = terminal.CopySelectionAsync();
+                }
+            };
+        }
 
         terminal.GotFocus += (_, _) => OnPaneFocused(terminal);
 
@@ -1305,7 +1337,7 @@ public sealed class MainWindow : Window
         TerminalWorkspaceWindow? window = _pendingRestore;
         List<TerminalWorkspaceWindow> siblings = [];
 
-        if (window is null)
+        if (window is null && Config.RestoreLayout)
         {
             TerminalWorkspaceDocument document;
             try

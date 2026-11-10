@@ -26,17 +26,19 @@ public static class ShellIntegration
         System.Environment.GetFolderPath(System.Environment.SpecialFolder.ApplicationData),
         "spike-royalterminal");
 
-    public static LaunchSpec Resolve()
+    public static LaunchSpec Resolve(string? preferredShell = null)
     {
         try
         {
-            if (OperatingSystem.IsWindows())
+            if (OperatingSystem.IsWindows() && preferredShell is null)
             {
                 return ResolveWindows();
             }
 
-            string shell = System.Environment.GetEnvironmentVariable("SHELL") ?? "/bin/bash";
-            string name = Path.GetFileName(shell);
+            string shell = preferredShell
+                ?? System.Environment.GetEnvironmentVariable("SHELL")
+                ?? "/bin/bash";
+            string name = Path.GetFileNameWithoutExtension(shell);
 
             return name switch
             {
