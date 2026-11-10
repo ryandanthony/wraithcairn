@@ -30,6 +30,7 @@ all).
 | `restoreLayout` | boolean | `true` | Restore the saved workspace on launch. `false` always starts fresh. |
 | `restoreScrollback` | boolean | `false` | Also save/replay each pane's scrollback (see below). |
 | `useGhosttyConfig` | boolean | `true` | Read `~/.config/ghostty/config` as a base layer at all. |
+| `showSplash` | boolean | `true` | Show a splash window at startup while the saved layout loads (status line plus a progress bar as panes start). |
 | `shell` | string or `null` | `$SHELL` | Explicit shell to launch, e.g. `"/usr/bin/fish"`. `null` uses `$SHELL`. |
 
 All keys are optional; omit anything you want left at its default or

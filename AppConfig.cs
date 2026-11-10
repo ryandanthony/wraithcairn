@@ -37,6 +37,9 @@ public sealed class AppConfig
     /// <summary>Read ~/.config/ghostty/config as a base layer.</summary>
     public bool UseGhosttyConfig { get; set; } = true;
 
+    /// <summary>Show a splash window while the saved layout loads.</summary>
+    public bool ShowSplash { get; set; } = true;
+
     /// <summary>Optional explicit shell, e.g. "/usr/bin/fish". Null = $SHELL.</summary>
     public string? Shell { get; set; }
 
@@ -89,6 +92,7 @@ public sealed class AppConfig
             config.RestoreLayout = appOverrides.RestoreLayout;
             config.RestoreScrollback = appOverrides.RestoreScrollback;
             config.UseGhosttyConfig = appOverrides.UseGhosttyConfig;
+            config.ShowSplash = appOverrides.ShowSplash;
             if (appOverrides.Shell is not null) config.Shell = appOverrides.Shell;
             config.Sources.Add(AppConfigPath);
         }
@@ -159,6 +163,8 @@ public sealed class AppConfig
                   "restoreLayout": true,
                   // Also bring back each pane's previous output (styled, capped).
                   "restoreScrollback": false,
+                  // Splash window while the saved layout loads.
+                  "showSplash": true,
                   "useGhosttyConfig": true
                 }
 

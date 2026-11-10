@@ -73,7 +73,7 @@ Settings layer in this order (later wins):
    copy-on-select (Ghostty themes are found by name)
 3. `~/.config/wraithcairn/config.json`: `fontFamily`, `fontSize`, `theme`,
    `copyOnSelect`, `shell`, `restoreLayout`, `restoreScrollback`,
-   `useGhosttyConfig`
+   `useGhosttyConfig`, `showSplash` (startup splash while the layout loads)
 
 Shell integration (OSC 7 cwd, OSC 133 prompts) is injected for bash, zsh,
 fish and PowerShell without editing your dotfiles.

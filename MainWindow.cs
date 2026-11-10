@@ -134,6 +134,28 @@ public sealed class MainWindow : Window
     private readonly TerminalWorkspaceWindow? _pendingRestore;
     private readonly bool _isPrimary;
 
+    /// <summary>Startup splash (primary window only); null when disabled or already closed.</summary>
+    internal static SplashWindow? Splash { get; set; }
+
+    /// <summary>What the splash showed, kept after it closes (for the selftest).</summary>
+    private static List<string>? SplashHistory { get; set; }
+
+    /// <summary>Splash on unless config says no or we're doing a headless one-shot.</summary>
+    internal static bool SplashEnabled =>
+        Config.ShowSplash && !Environment.GetCommandLineArgs().Contains("--dump-panes");
+
+    private static void ReportSplash(string status, int done = 0, int total = 0) =>
+        Splash?.Report(status, done, total);
+
+    /// <summary>Only the primary window's restore drives the splash.</summary>
+    private void ReportProgress(string status, int done = 0, int total = 0)
+    {
+        if (_isPrimary)
+        {
+            ReportSplash(status, done, total);
+        }
+    }
+
     public MainWindow()
         : this(null, isPrimary: true)
     {
@@ -204,6 +226,32 @@ public sealed class MainWindow : Window
             try
             {
                 await RestoreWorkspaceAsync();
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"startup failed: {ex}");
+            }
+            finally
+            {
+                if (_isPrimary && Splash is { } splash)
+                {
+                    splash.Report("ready", 1, 1);
+                    if (Environment.GetCommandLineArgs().Contains("--selftest"))
+                    {
+                        await Task.Delay(400);
+                        SnapshotControl(splash, "/tmp/wraithcairn-selftest-splash.png");
+                    }
+
+                    await splash.CloseWhenReadyAsync();
+                    SplashHistory = splash.History;
+                    Splash = null;
+                    Activate();
+                    ActiveTab()?.Active?.Focus();
+                }
+            }
+
+            try
+            {
                 if (_isPrimary && Environment.GetCommandLineArgs().Contains("--dump-panes"))
                 {
                     await DumpPanesAsync();
@@ -887,6 +935,12 @@ public sealed class MainWindow : Window
         Console.WriteLine($"SELFTEST phase={phase}");
         Console.WriteLine($"SELFTEST version={AppInfo.Version}");
         Console.WriteLine($"SELFTEST icon_loaded={AppInfo.WindowIcon is not null && Icon is not null}");
+        Console.WriteLine($"SELFTEST splash shown={SplashHistory is not null} closed={Splash is null} "
+            + $"steps={SplashHistory?.Count ?? 0} last={SplashHistory?.LastOrDefault()}");
+        if (SplashHistory is not null)
+        {
+            Console.WriteLine($"SELFTEST splash_steps={string.Join(" | ", SplashHistory)}");
+        }
         Console.WriteLine($"SELFTEST ghostty={RoyalTerminal.Terminal.GhosttyVtProcessor.IsAvailable()}");
         Console.WriteLine($"SELFTEST gpu_gl={IsGpuCompositing()}");
         Console.WriteLine($"SELFTEST shell={_shell.ShellName} integrated={_shell.Integrated}");
@@ -1199,18 +1253,20 @@ public sealed class MainWindow : Window
         }
     }
 
-    private void SnapshotWindow(string path)
+    private void SnapshotWindow(string path) => SnapshotControl(this, path);
+
+    private static void SnapshotControl(Control control, string path)
     {
         try
         {
-            PixelSize size = new((int)Bounds.Width, (int)Bounds.Height);
+            PixelSize size = new((int)control.Bounds.Width, (int)control.Bounds.Height);
             if (size.Width <= 0 || size.Height <= 0)
             {
                 return;
             }
 
             using Avalonia.Media.Imaging.RenderTargetBitmap bitmap = new(size, new Vector(96, 96));
-            bitmap.Render(this);
+            bitmap.Render(control);
             bitmap.Save(path);
         }
         catch (Exception ex)
@@ -2504,6 +2560,7 @@ public sealed class MainWindow : Window
 
         if (window is null && Config.RestoreLayout)
         {
+            ReportProgress($"reading {Path.GetFileName(WorkspacePath)}…");
             TerminalWorkspaceDocument document;
             try
             {
@@ -2528,6 +2585,7 @@ public sealed class MainWindow : Window
 
         if (window is null || window.Tabs.Count == 0)
         {
+            ReportProgress("starting shell…");
             await NewTabAsync(null);
             return;
         }
@@ -2542,8 +2600,11 @@ public sealed class MainWindow : Window
         List<Task> sessions = [];
         Tab? selected = null;
 
+        int layoutIndex = 0;
         foreach (TerminalWorkspaceTab savedTab in window.Tabs)
         {
+            layoutIndex++;
+            ReportProgress($"building layout \"{savedTab.Title}\" ({layoutIndex}/{window.Tabs.Count})…");
             (TerminalPaneNode root, Dictionary<TerminalControl, TerminalPaneNode> nodes) =
                 BuildPaneTree(savedTab.RootPane, sessions);
 
@@ -2569,7 +2630,22 @@ public sealed class MainWindow : Window
             SwitchToLayout(selected);
         }
 
-        await Task.WhenAll(sessions);
+        // Count panes as their shells come up so the splash shows real progress.
+        int started = 0;
+        int totalPanes = sessions.Count;
+        ReportProgress($"starting {totalPanes} pane{(totalPanes == 1 ? "" : "s")}…", 0, totalPanes);
+        await Task.WhenAll(sessions.Select(async session =>
+        {
+            try
+            {
+                await session;
+            }
+            finally
+            {
+                int done = Interlocked.Increment(ref started);
+                ReportProgress($"started {done} of {totalPanes} pane{(totalPanes == 1 ? "" : "s")}", done, totalPanes);
+            }
+        }));
         selected?.Active?.Focus();
         if (selected is not null)
         {
@@ -2577,6 +2653,11 @@ public sealed class MainWindow : Window
         }
 
         // Open the other saved windows (primary window only).
+        if (siblings.Count(s => s.Tabs.Count > 0) is int extra and > 0)
+        {
+            ReportProgress($"opening {extra} more window{(extra == 1 ? "" : "s")}…");
+        }
+
         foreach (TerminalWorkspaceWindow sibling in siblings)
         {
             if (sibling.Tabs.Count > 0)

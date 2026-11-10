@@ -58,6 +58,15 @@ public sealed class App : Application
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
+            // Splash first, so something appears immediately; the main window
+            // restores the layout behind it and closes it when done.
+            if (MainWindow.SplashEnabled)
+            {
+                SplashWindow splash = new();
+                splash.Show();
+                MainWindow.Splash = splash;
+            }
+
             desktop.MainWindow = new MainWindow();
         }
 
