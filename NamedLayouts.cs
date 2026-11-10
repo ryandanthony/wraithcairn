@@ -1,4 +1,4 @@
-namespace SpikeRoyalTerminal;
+namespace Wraithcairn;
 
 /// <summary>
 /// Named layouts. The default layout is workspace.json; each named one is

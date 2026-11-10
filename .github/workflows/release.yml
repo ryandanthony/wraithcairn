@@ -43,19 +43,19 @@ jobs:
         if: matrix.ext == 'tar.gz'
         run: |
           cd publish/${{ matrix.rid }}
-          tar -czf ../../spike-royalterminal-${{ matrix.rid }}.tar.gz .
+          tar -czf ../../wraithcairn-${{ matrix.rid }}.tar.gz .
 
       - name: Package (zip)
         if: matrix.ext == 'zip'
         run: |
           cd publish/${{ matrix.rid }}
-          zip -r ../../spike-royalterminal-${{ matrix.rid }}.zip .
+          zip -r ../../wraithcairn-${{ matrix.rid }}.zip .
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: spike-royalterminal-${{ matrix.rid }}
-          path: spike-royalterminal-${{ matrix.rid }}.${{ matrix.ext }}
+          name: wraithcairn-${{ matrix.rid }}
+          path: wraithcairn-${{ matrix.rid }}.${{ matrix.ext }}
 
   release:
     needs: publish

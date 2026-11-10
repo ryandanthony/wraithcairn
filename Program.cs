@@ -3,7 +3,7 @@ using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml.Styling;
 using Avalonia.Themes.Fluent;
 
-namespace SpikeRoyalTerminal;
+namespace Wraithcairn;
 
 internal static class Program
 {

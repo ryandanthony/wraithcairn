@@ -4,7 +4,7 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
 
-namespace SpikeRoyalTerminal;
+namespace Wraithcairn;
 
 /// <summary>
 /// Modal editor for one pane's startup: directory, program, arguments, and

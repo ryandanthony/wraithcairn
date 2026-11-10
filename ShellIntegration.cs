@@ -1,6 +1,6 @@
 using RoyalTerminal.Terminal;
 
-namespace SpikeRoyalTerminal;
+namespace Wraithcairn;
 
 /// <summary>
 /// Detects the user's shell and prepares a launch spec that loads the
@@ -24,7 +24,7 @@ public static class ShellIntegration
 
     private static readonly string ConfigDir = Path.Combine(
         System.Environment.GetFolderPath(System.Environment.SpecialFolder.ApplicationData),
-        "spike-royalterminal");
+        "wraithcairn");
 
     public static LaunchSpec Resolve(string? preferredShell = null)
     {

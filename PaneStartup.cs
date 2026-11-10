@@ -4,7 +4,7 @@ using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using RoyalTerminal.Terminal;
 
-namespace SpikeRoyalTerminal;
+namespace Wraithcairn;
 
 /// <summary>
 /// Per-pane startup configuration, stored inline in the layout JSON as a

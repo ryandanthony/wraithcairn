@@ -2,12 +2,12 @@ using System.Text;
 using RoyalTerminal.Avalonia.Controls;
 using RoyalTerminal.Terminal;
 
-namespace SpikeRoyalTerminal;
+namespace Wraithcairn;
 
 /// <summary>
 /// Optional scrollback persistence. On save, each pane's visible screen plus
 /// scrollback is exported as styled VT (colors kept) to
-/// ~/.config/spike-royalterminal/scrollback/{paneId}.vt. On restore the bytes
+/// ~/.config/wraithcairn/scrollback/{paneId}.vt. On restore the bytes
 /// are written into the fresh terminal before the shell starts, with
 /// PreserveScrollbackOnSessionStart so the new prompt appears below the old
 /// output instead of wiping it.

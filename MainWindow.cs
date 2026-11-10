@@ -10,10 +10,10 @@ using RoyalTerminal.Avalonia.Services;
 using RoyalTerminal.Terminal;
 using RoyalTerminal.Terminal.Services;
 
-namespace SpikeRoyalTerminal;
+namespace Wraithcairn;
 
 /// <summary>
-/// Spike: a cross-platform tabbed + split terminal on RoyalTerminal
+/// Wraithcairn: a cross-platform split-pane terminal on RoyalTerminal
 /// (libghostty-vt engine) that saves its layout (tabs, splits, ratios,
 /// per-pane cwd) to workspace.json and restores it on next start.
 ///
@@ -115,8 +115,8 @@ public sealed class MainWindow : Window
         Windows.Add(this);
         Activated += (_, _) => _lastFocused = this;
         Title = NamedLayouts.ActiveName is { } layoutName
-            ? $"spike-royalterminal [{layoutName}]"
-            : "spike-royalterminal";
+            ? $"wraithcairn [{layoutName}]"
+            : "wraithcairn";
         Width = 1200;
         Height = 800;
         Background = Config.ResolvedTheme is { } chromeTheme
@@ -684,7 +684,7 @@ public sealed class MainWindow : Window
         }
 
         Tab? tab = ActiveTab();
-        tab?.Active?.SendInput("echo spike-selftest-$((6*7))\n");
+        tab?.Active?.SendInput("echo wraithcairn-selftest-$((6*7))\n");
         await Task.Delay(2500);
 
         string phase = restored ? "restored" : "initial";
@@ -711,7 +711,7 @@ public sealed class MainWindow : Window
         string screenText = tab?.Active is { } active && TryReadScreenText(active, out string text)
             ? text
             : string.Empty;
-        bool sawEcho = screenText.Contains("spike-selftest-42");
+        bool sawEcho = screenText.Contains("wraithcairn-selftest-42");
         Console.WriteLine($"SELFTEST echo_output_visible={sawEcho}");
 
         if (restored && Config.RestoreScrollback)
@@ -722,7 +722,7 @@ public sealed class MainWindow : Window
 
         if (tab?.Active is { } searchControl)
         {
-            searchControl.StartSearch("spike-selftest");
+            searchControl.StartSearch("wraithcairn-selftest");
             Console.WriteLine($"SELFTEST search_matches={searchControl.SearchTotal}");
             searchControl.EndSearch();
         }
@@ -805,8 +805,8 @@ public sealed class MainWindow : Window
         // Keep the primary window as the one restore selects next launch.
         _lastFocused = this;
 
-        SnapshotWindow($"/tmp/spike-selftest-{phase}.png");
-        Console.WriteLine($"SELFTEST snapshot=/tmp/spike-selftest-{phase}.png");
+        SnapshotWindow($"/tmp/wraithcairn-selftest-{phase}.png");
+        Console.WriteLine($"SELFTEST snapshot=/tmp/wraithcairn-selftest-{phase}.png");
 
         SaveWorkspace();
         Console.WriteLine($"SELFTEST workspace={WorkspacePath} exists={File.Exists(WorkspacePath)}");
@@ -1148,7 +1148,7 @@ public sealed class MainWindow : Window
     {
         Dictionary<string, string> environment = new()
         {
-            ["TERM_PROGRAM"] = "spike-royalterminal",
+            ["TERM_PROGRAM"] = "wraithcairn",
         };
         if (_shell.Environment is not null)
         {
@@ -2070,7 +2070,7 @@ public sealed class MainWindow : Window
             ? $" — {d}"
             : string.Empty;
         string count = _tabs.Count > 1 ? $" ({_tabs.IndexOf(tab) + 1}/{_tabs.Count})" : string.Empty;
-        Title = $"{tab.Name}{count}{detail} — spike-royalterminal";
+        Title = $"{tab.Name}{count}{detail} — wraithcairn";
     }
 
     private void UpdateStatus(Tab tab)

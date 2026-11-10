@@ -4,14 +4,14 @@ using System.Text.Json.Serialization;
 using RoyalTerminal.Terminal;
 using RoyalTerminal.Terminal.Theming;
 
-namespace SpikeRoyalTerminal;
+namespace Wraithcairn;
 
 /// <summary>
 /// App settings. Resolution order (later wins):
 ///   1. built-in defaults
 ///   2. ~/.config/ghostty/config  (font-family, font-size, theme,
 ///      background/foreground/palette/cursor-color/selection-*, copy-on-select)
-///   3. ~/.config/spike-royalterminal/config.json  (this app's own overrides)
+///   3. ~/.config/wraithcairn/config.json  (this app's own overrides)
 ///
 /// Ghostty themes are looked up by name in the usual Ghostty theme dirs
 /// (user, system, and an extracted AppImage) so `theme = GitHub Dark Dimmed`
@@ -49,7 +49,7 @@ public sealed class AppConfig
 
     public static string ConfigDir { get; } = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        "spike-royalterminal");
+        "wraithcairn");
 
     public static string AppConfigPath => Path.Combine(ConfigDir, "config.json");
 
@@ -147,7 +147,7 @@ public sealed class AppConfig
             File.WriteAllText(AppConfigPath,
                 """
                 {
-                  // Overrides for spike-royalterminal. Anything left out comes from
+                  // Overrides for wraithcairn. Anything left out comes from
                   // ~/.config/ghostty/config (font-family, font-size, theme,
                   // copy-on-select), then built-in defaults.
                   //
