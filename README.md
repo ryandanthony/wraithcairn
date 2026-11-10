@@ -1,5 +1,7 @@
 # wraithcairn
 
+Docs: https://ryandanthony.github.io/wraithcairn/
+
 A cross-platform split-pane terminal built with Avalonia on top of the
 [RoyalTerminal](https://www.nuget.org/packages/RoyalApps.RoyalTerminal.Avalonia)
 NuGet packages, which wrap Ghostty's native `libghostty-vt` VT engine.

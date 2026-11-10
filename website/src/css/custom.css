@@ -1,0 +1,89 @@
+/**
+ * Wraithcairn Documentation Theme
+ * Slate / blue-grey colors, matching assets/icon.svg
+ *
+ * Color Palette:
+ * - Primary: #536372 (slate)
+ * - Background: #0b1016
+ * - Text: #eaeaea
+ * - Border: #30363d
+ */
+
+/* Light mode */
+:root {
+  --ifm-color-primary: #46525f;
+  --ifm-color-primary-dark: #3f4a56;
+  --ifm-color-primary-darker: #3b4650;
+  --ifm-color-primary-darkest: #313a42;
+  --ifm-color-primary-light: #4d5a68;
+  --ifm-color-primary-lighter: #515f6e;
+  --ifm-color-primary-lightest: #5f6f80;
+  --ifm-code-font-size: 95%;
+  --ifm-font-family-monospace: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
+  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.1);
+}
+
+/* Dark mode */
+[data-theme='dark'] {
+  --ifm-color-primary: #8fa3b3;
+  --ifm-color-primary-dark: #7c93a5;
+  --ifm-color-primary-darker: #738b9e;
+  --ifm-color-primary-darkest: #5c7486;
+  --ifm-color-primary-light: #a2b3c1;
+  --ifm-color-primary-lighter: #abbbc8;
+  --ifm-color-primary-lightest: #cad5dc;
+  --ifm-background-color: #0b1016;
+  --ifm-background-surface-color: #1a2733;
+  --ifm-navbar-background-color: #0b1016;
+  --ifm-footer-background-color: #0b1016;
+  --ifm-code-background: #171f27;
+  --docusaurus-highlighted-code-line-bg: rgba(143, 163, 179, 0.15);
+}
+
+/* Code block styling */
+[data-theme='dark'] .prism-code {
+  background-color: #0b1016;
+}
+
+[data-theme='dark'] code {
+  background-color: #171f27;
+  border: 1px solid #30363d;
+}
+
+/* Hero section styling for landing page */
+.hero--primary {
+  --ifm-hero-background-color: var(--ifm-background-color);
+  --ifm-hero-text-color: var(--ifm-font-color-base);
+}
+
+[data-theme='dark'] .hero--primary {
+  background: linear-gradient(180deg, #0b1016 0%, #1a2733 100%);
+}
+
+/* Navbar tweaks */
+[data-theme='dark'] .navbar {
+  border-bottom: 1px solid #30363d;
+}
+
+/* Footer tweaks */
+[data-theme='dark'] .footer {
+  border-top: 1px solid #30363d;
+}
+
+/* Sidebar tweaks */
+[data-theme='dark'] .menu__link--active {
+  color: #8fa3b3;
+}
+
+/* Table styling */
+[data-theme='dark'] table {
+  border-color: #30363d;
+}
+
+[data-theme='dark'] th {
+  background-color: #1a2733;
+}
+
+[data-theme='dark'] tr:nth-child(2n) {
+  background-color: #0b1016;
+}
