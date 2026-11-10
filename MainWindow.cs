@@ -46,6 +46,7 @@ public sealed class MainWindow : Window
     private readonly TextBlock _status;
     private readonly TextBox _searchBox;
     private readonly Border _searchBar;
+    private Menu? _menu;
     private readonly ShellIntegration.LaunchSpec _shell = ShellIntegration.Resolve();
     private double _fontSize = 11;
     private static int _paneCounter;
@@ -152,8 +153,11 @@ public sealed class MainWindow : Window
         _searchBox.TextChanged += (_, _) => RunSearch(select: false);
 
         DockPanel root = new();
+        Menu menu = BuildMenu();
+        DockPanel.SetDock(menu, Dock.Top);
         DockPanel.SetDock(_status, Dock.Bottom);
         DockPanel.SetDock(_searchBar, Dock.Top);
+        root.Children.Add(menu);
         root.Children.Add(_status);
         root.Children.Add(_searchBar);
         root.Children.Add(_tabStrip);
@@ -278,6 +282,86 @@ public sealed class MainWindow : Window
         }
     }
 
+    // ----- menu ------------------------------------------------------------
+
+    /// <summary>
+    /// Menu bar mirroring the keyboard shortcuts. Gestures are display-only
+    /// (the window's tunnel key handler does the real work), so nothing fires
+    /// twice. Headers have no access-key underscores, so Alt+letter still
+    /// reaches the shell (readline word movement etc.).
+    /// </summary>
+    private Menu BuildMenu()
+    {
+        static MenuItem Item(string header, KeyGesture? gesture, Action action)
+        {
+            MenuItem item = new() { Header = header, InputGesture = gesture };
+            item.Click += (_, _) => action();
+            return item;
+        }
+
+        static KeyGesture Gesture(Key key, KeyModifiers modifiers = KeyModifiers.Control | KeyModifiers.Shift) =>
+            new(key, modifiers);
+
+        MenuItem shell = new() { Header = "Shell" };
+        shell.Items.Add(Item("New Tab", Gesture(Key.T), () => _ = NewTabAsync(null)));
+        shell.Items.Add(Item("New Window", Gesture(Key.N), () => new MainWindow(null, isPrimary: false).Show()));
+        shell.Items.Add(new Separator());
+        shell.Items.Add(Item("Close Pane", Gesture(Key.W), () => ClosePane()));
+
+        MenuItem pane = new() { Header = "Pane" };
+        pane.Items.Add(Item("Split Right", Gesture(Key.O),
+            () => _ = SplitAsync(TerminalPaneSplitOrientation.Horizontal)));
+        pane.Items.Add(Item("Split Down", Gesture(Key.E),
+            () => _ = SplitAsync(TerminalPaneSplitOrientation.Vertical)));
+        pane.Items.Add(new Separator());
+        pane.Items.Add(Item("Zoom Pane", Gesture(Key.Z), ToggleZoom));
+        pane.Items.Add(Item("Equalize Splits", Gesture(Key.OemPlus), EqualizeSplits));
+
+        MenuItem edit = new() { Header = "Edit" };
+        edit.Items.Add(Item("Copy", Gesture(Key.C), () =>
+        {
+            if (ActiveTab()?.Active is { HasSelection: true } control)
+            {
+                _ = control.CopySelectionAsync();
+            }
+        }));
+        edit.Items.Add(Item("Paste", Gesture(Key.V), () =>
+        {
+            if (ActiveTab()?.Active is { } control)
+            {
+                _ = control.PasteAsync();
+            }
+        }));
+        edit.Items.Add(new Separator());
+        edit.Items.Add(Item("Find", Gesture(Key.F), OpenSearch));
+        edit.Items.Add(Item("Clear Scrollback", Gesture(Key.K), () => ActiveTab()?.Active?.ClearScrollback()));
+
+        MenuItem view = new() { Header = "View" };
+        view.Items.Add(Item("Bigger Text", Gesture(Key.OemPlus, KeyModifiers.Control),
+            () => SetFontSize(_fontSize + 1)));
+        view.Items.Add(Item("Smaller Text", Gesture(Key.OemMinus, KeyModifiers.Control),
+            () => SetFontSize(_fontSize - 1)));
+
+        Menu menu = new() { FontSize = 12 };
+        menu.Items.Add(shell);
+        menu.Items.Add(pane);
+        menu.Items.Add(edit);
+        menu.Items.Add(view);
+
+        // Clicking the menu takes keyboard focus; hand it back to the active
+        // pane afterwards (unless the action opened the find bar).
+        menu.Closed += (_, _) => Dispatcher.UIThread.Post(() =>
+        {
+            if (!_searchBar.IsVisible)
+            {
+                ActiveTab()?.Active?.Focus();
+            }
+        }, DispatcherPriority.Background);
+
+        _menu = menu;
+        return menu;
+    }
+
     // ----- self test --------------------------------------------------------
 
     /// <summary>
@@ -351,6 +435,29 @@ public sealed class MainWindow : Window
 
         // Multi-window: first phase opens a second window with one tab;
         // restored phase just reports how many windows came back.
+        if (!restored)
+        {
+            // Drive "Pane > Split Right" through the real menu item, on the
+            // /tmp tab so the main tab's layout stays as built above.
+            Tab? tmpTab = _tabs.Count > 1 ? _tabs[1] : null;
+            MenuItem? splitRight = _menu?.Items.OfType<MenuItem>()
+                .FirstOrDefault(m => (string?)m.Header == "Pane")?.Items.OfType<MenuItem>()
+                .FirstOrDefault(m => (string?)m.Header == "Split Right");
+            if (tmpTab is not null && splitRight is not null)
+            {
+                _tabStrip.SelectedItem = tmpTab.Item;
+                int before = tmpTab.Nodes.Count;
+                splitRight.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+                await Task.Delay(1500);
+                Console.WriteLine($"SELFTEST menu_split_right={tmpTab.Nodes.Count == before + 1}");
+                _tabStrip.SelectedItem = _tabs[0].Item;
+            }
+            else
+            {
+                Console.WriteLine("SELFTEST menu_split_right=False (menu item missing)");
+            }
+        }
+
         if (!restored)
         {
             MainWindow second = new(
