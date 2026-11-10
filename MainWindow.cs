@@ -22,6 +22,8 @@ namespace SpikeRoyalTerminal;
 ///   Ctrl+Shift+W        close pane (last pane closes the tab)
 ///   Ctrl+Shift+O        split right          Ctrl+Shift+E  split down
 ///   Alt+Arrows          move focus between panes
+///   Ctrl+Alt+Arrows     resize split          Ctrl+Shift+Z  zoom pane
+///   Ctrl+Shift+=        equalize splits
 ///   Ctrl+PgUp/PgDn      previous / next tab
 ///   Ctrl+Shift+PgUp/PgDn move tab left / right
 ///   Ctrl+= / Ctrl+-     font size
@@ -53,7 +55,19 @@ public sealed class MainWindow : Window
         /// <summary>True once the program set a title via OSC; stops cwd-based titles.</summary>
         public bool TitleFromOsc { get; set; }
 
+        /// <summary>Set while one pane is zoomed to fill the tab.</summary>
+        public ZoomState? Zoom { get; set; }
+
         public Dictionary<TerminalControl, TerminalPaneNode> Nodes { get; } = [];
+    }
+
+    private sealed class ZoomState
+    {
+        public required TerminalPaneNode Leaf { get; init; }
+        public required Grid ParentGrid { get; init; }
+        public required int ChildIndex { get; init; }
+        public required int Row { get; init; }
+        public required int Column { get; init; }
     }
 
     private readonly List<Tab> _tabs = [];
@@ -234,6 +248,25 @@ public sealed class MainWindow : Window
         bool sawEcho = screenText.Contains("spike-selftest-42");
         Console.WriteLine($"SELFTEST echo_output_visible={sawEcho}");
 
+        // Exercise split UX: resize, equalize, zoom toggle round-trip.
+        if (tab is not null && tab.Nodes.Count > 1)
+        {
+            TerminalPaneNode? firstSplit = tab.Root.First is not null ? tab.Root : null;
+            double ratioBefore = firstSplit?.Ratio ?? 0.5;
+            ResizeSplit(TerminalPaneDirection.Right);
+            double ratioAfter = firstSplit?.Ratio ?? 0.5;
+            Console.WriteLine($"SELFTEST resize_changed_ratio={Math.Abs(ratioAfter - ratioBefore) > 0.001}");
+
+            EqualizeSplits();
+            Console.WriteLine($"SELFTEST equalized={Math.Abs((firstSplit?.Ratio ?? 0.5) - 0.5) < 0.001}");
+
+            ToggleZoom();
+            bool zoomedIn = tab.Zoom is not null;
+            ToggleZoom();
+            bool zoomedOut = tab.Zoom is null;
+            Console.WriteLine($"SELFTEST zoom_roundtrip={zoomedIn && zoomedOut}");
+        }
+
         SnapshotWindow($"/tmp/spike-selftest-{phase}.png");
         Console.WriteLine($"SELFTEST snapshot=/tmp/spike-selftest-{phase}.png");
 
@@ -324,12 +357,25 @@ public sealed class MainWindow : Window
         else if (ctrlShift && e.Key == Key.W) { ClosePane(); e.Handled = true; }
         else if (ctrlShift && e.Key == Key.O) { _ = SplitAsync(TerminalPaneSplitOrientation.Horizontal); e.Handled = true; }
         else if (ctrlShift && e.Key == Key.E) { _ = SplitAsync(TerminalPaneSplitOrientation.Vertical); e.Handled = true; }
+        else if (ctrlShift && e.Key == Key.Z) { ToggleZoom(); e.Handled = true; }
+        else if (ctrlShift && e.Key is Key.OemPlus or Key.Add) { EqualizeSplits(); e.Handled = true; }
         else if (ctrlShift && e.Key == Key.PageDown) { MoveTab(1); e.Handled = true; }
         else if (ctrlShift && e.Key == Key.PageUp) { MoveTab(-1); e.Handled = true; }
         else if (ctrl && e.Key == Key.PageDown) { CycleTab(1); e.Handled = true; }
         else if (ctrl && e.Key == Key.PageUp) { CycleTab(-1); e.Handled = true; }
         else if (ctrl && e.Key is Key.OemPlus or Key.Add) { SetFontSize(_fontSize + 1); e.Handled = true; }
         else if (ctrl && e.Key is Key.OemMinus or Key.Subtract) { SetFontSize(_fontSize - 1); e.Handled = true; }
+        else if (ctrl && alt && e.Key is Key.Left or Key.Right or Key.Up or Key.Down)
+        {
+            ResizeSplit(e.Key switch
+            {
+                Key.Left => TerminalPaneDirection.Left,
+                Key.Right => TerminalPaneDirection.Right,
+                Key.Up => TerminalPaneDirection.Up,
+                _ => TerminalPaneDirection.Down,
+            });
+            e.Handled = true;
+        }
         else if (alt && e.Key is Key.Left or Key.Right or Key.Up or Key.Down)
         {
             MoveFocus(e.Key switch
@@ -433,7 +479,13 @@ public sealed class MainWindow : Window
             id: $"pane-{++_paneCounter}",
             workingDirectory: cwd,
             transportId: TerminalTransportIds.Pty);
-        node.SetLeaf(terminal, TerminalPaneLayout.CreatePaneScrollViewer(terminal));
+        Border paneBorder = new()
+        {
+            Child = TerminalPaneLayout.CreatePaneScrollViewer(terminal),
+            BorderThickness = new Thickness(1),
+            BorderBrush = Brushes.Transparent,
+        };
+        node.SetLeaf(terminal, paneBorder);
         return node;
     }
 
@@ -579,6 +631,12 @@ public sealed class MainWindow : Window
         TerminalPaneNode newLeaf = CreateLeaf(newControl, cwd);
         tab.Nodes[newControl] = newLeaf;
 
+        // Leave zoom before changing the tree.
+        if (tab.Zoom is not null)
+        {
+            ToggleZoom();
+        }
+
         TerminalPaneNode parent = activeNode.Parent is { } p ? p : null!;
         TerminalPaneNode splitNode = new($"pane-{++_paneCounter}");
 
@@ -634,6 +692,12 @@ public sealed class MainWindow : Window
         if (control is null || !tab.Nodes.TryGetValue(control, out TerminalPaneNode? node))
         {
             return;
+        }
+
+        // Leave zoom before changing the tree.
+        if (tab.Zoom is not null)
+        {
+            ToggleZoom();
         }
 
         if (node.Parent is not TerminalPaneNode parent)
@@ -712,8 +776,113 @@ public sealed class MainWindow : Window
         }
 
         tab.Active = terminal;
+        UpdateFocusBorders(tab);
         UpdateStatus(tab);
         UpdateWindowTitle(tab);
+    }
+
+    private static void UpdateFocusBorders(Tab tab)
+    {
+        bool multiplePanes = tab.Nodes.Count > 1;
+        foreach ((TerminalControl control, TerminalPaneNode node) in tab.Nodes)
+        {
+            if (node.LeafContainer is Border border)
+            {
+                border.BorderBrush = multiplePanes && ReferenceEquals(control, tab.Active)
+                    ? new SolidColorBrush(Color.Parse("#89b4fa"))
+                    : Brushes.Transparent;
+            }
+        }
+    }
+
+    // ----- zoom / resize ----------------------------------------------------
+
+    /// <summary>Temporarily maximize the active pane inside its tab.</summary>
+    private void ToggleZoom()
+    {
+        Tab? tab = ActiveTab();
+        if (tab is null)
+        {
+            return;
+        }
+
+        if (tab.Zoom is ZoomState zoom)
+        {
+            // Restore: put the leaf's visual back into its parent grid slot.
+            DetachFromParent(zoom.Leaf.Visual);
+            Grid.SetRow(zoom.Leaf.Visual, zoom.Row);
+            Grid.SetColumn(zoom.Leaf.Visual, zoom.Column);
+            zoom.ParentGrid.Children.Insert(
+                Math.Min(zoom.ChildIndex, zoom.ParentGrid.Children.Count), zoom.Leaf.Visual);
+            tab.Host.Child = tab.Root.Visual;
+            tab.Zoom = null;
+            tab.Active?.Focus();
+            return;
+        }
+
+        if (tab.Active is not TerminalControl active
+            || !tab.Nodes.TryGetValue(active, out TerminalPaneNode? leaf)
+            || leaf.Parent?.SplitGrid is not Grid parentGrid)
+        {
+            return; // single pane, nothing to zoom
+        }
+
+        tab.Zoom = new ZoomState
+        {
+            Leaf = leaf,
+            ParentGrid = parentGrid,
+            ChildIndex = parentGrid.Children.IndexOf(leaf.Visual),
+            Row = Grid.GetRow(leaf.Visual),
+            Column = Grid.GetColumn(leaf.Visual),
+        };
+        parentGrid.Children.Remove(leaf.Visual);
+        tab.Host.Child = leaf.Visual;
+        active.Focus();
+    }
+
+    private void ResizeSplit(TerminalPaneDirection direction)
+    {
+        Tab? tab = ActiveTab();
+        if (tab?.Active is not TerminalControl active
+            || !tab.Nodes.TryGetValue(active, out TerminalPaneNode? node))
+        {
+            return;
+        }
+
+        bool wantsHorizontal = direction is TerminalPaneDirection.Left or TerminalPaneDirection.Right;
+        TerminalPaneNode? split = TerminalPaneLayout.FindResizeSplit(node, wantsHorizontal);
+        if (split is null)
+        {
+            return;
+        }
+
+        double delta = TerminalPaneLayout.GetFocusedPaneResizeDelta(split, node, direction);
+        TerminalPaneLayout.ApplySplitRatio(split, split.Ratio + delta);
+        MarkLayoutDirty();
+    }
+
+    private void EqualizeSplits()
+    {
+        Tab? tab = ActiveTab();
+        if (tab is null)
+        {
+            return;
+        }
+
+        Equalize(tab.Root);
+        MarkLayoutDirty();
+
+        static void Equalize(TerminalPaneNode node)
+        {
+            if (node.First is null || node.Second is null)
+            {
+                return;
+            }
+
+            TerminalPaneLayout.ApplySplitRatio(node, 0.5);
+            Equalize(node.First);
+            Equalize(node.Second);
+        }
     }
 
     // ----- workspace save / restore ----------------------------------------
