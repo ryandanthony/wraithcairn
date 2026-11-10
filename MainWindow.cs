@@ -114,6 +114,7 @@ public sealed class MainWindow : Window
         _shell = ShellIntegration.Resolve(Config.Shell);
         Windows.Add(this);
         Activated += (_, _) => _lastFocused = this;
+        Icon = AppInfo.WindowIcon;
         Title = NamedLayouts.ActiveName is { } layoutName
             ? $"wraithcairn [{layoutName}]"
             : "wraithcairn";
@@ -358,6 +359,10 @@ public sealed class MainWindow : Window
             () => SetFontSize(_fontSize + 1)));
         view.Items.Add(Item("Smaller Text", Gesture(Key.OemMinus, KeyModifiers.Control),
             () => SetFontSize(_fontSize - 1)));
+        view.Items.Add(new Separator());
+        MenuItem about = new() { Header = $"About wraithcairn {AppInfo.Version}…" };
+        about.Click += async (_, _) => await AppInfo.ShowAboutAsync(this);
+        view.Items.Add(about);
 
         MenuItem layouts = new() { Header = "Layouts" };
         layouts.SubmenuOpened += (_, _) => RebuildLayoutsMenu(layouts);
@@ -689,6 +694,8 @@ public sealed class MainWindow : Window
 
         string phase = restored ? "restored" : "initial";
         Console.WriteLine($"SELFTEST phase={phase}");
+        Console.WriteLine($"SELFTEST version={AppInfo.Version}");
+        Console.WriteLine($"SELFTEST icon_loaded={AppInfo.WindowIcon is not null && Icon is not null}");
         Console.WriteLine($"SELFTEST ghostty={RoyalTerminal.Terminal.GhosttyVtProcessor.IsAvailable()}");
         Console.WriteLine($"SELFTEST gpu_gl={IsGpuCompositing()}");
         Console.WriteLine($"SELFTEST shell={_shell.ShellName} integrated={_shell.Integrated}");

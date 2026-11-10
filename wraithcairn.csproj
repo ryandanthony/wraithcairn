@@ -6,7 +6,21 @@
     <RootNamespace>Wraithcairn</RootNamespace>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Windows .exe icon (built from assets/icon-*.png) -->
+    <ApplicationIcon>assets/icon.ico</ApplicationIcon>
+    <Product>wraithcairn</Product>
+    <!-- Local builds report 0.0.0-dev; the release workflow passes
+         -p:Version / -p:InformationalVersion from GitVersion. -->
+    <Version>0.0.0</Version>
+    <InformationalVersion>0.0.0-dev</InformationalVersion>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Window/taskbar icon loaded at runtime via avares:// -->
+    <AvaloniaResource Include="assets/icon-256.png" Link="assets/icon-256.png" />
+    <AvaloniaResource Include="assets/icon-64.png" Link="assets/icon-64.png" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Avalonia.Desktop" Version="12.1.3" />
