@@ -18,11 +18,12 @@ namespace SpikeRoyalTerminal;
 /// per-pane cwd) to workspace.json and restores it on next start.
 ///
 /// Keys:
-///   Ctrl+Shift+T        new tab
+///   Ctrl+Shift+T        new tab (or click +)
 ///   Ctrl+Shift+W        close pane (last pane closes the tab)
 ///   Ctrl+Shift+O        split right          Ctrl+Shift+E  split down
 ///   Alt+Arrows          move focus between panes
 ///   Ctrl+PgUp/PgDn      previous / next tab
+///   Ctrl+Shift+PgUp/PgDn move tab left / right
 ///   Ctrl+= / Ctrl+-     font size
 /// </summary>
 public sealed class MainWindow : Window
@@ -49,10 +50,14 @@ public sealed class MainWindow : Window
         public required TerminalPaneNode Root { get; set; }
         public TerminalControl? Active { get; set; }
 
+        /// <summary>True once the program set a title via OSC; stops cwd-based titles.</summary>
+        public bool TitleFromOsc { get; set; }
+
         public Dictionary<TerminalControl, TerminalPaneNode> Nodes { get; } = [];
     }
 
     private readonly List<Tab> _tabs = [];
+    private readonly TabItem _plusTab;
     private readonly DispatcherTimer _autosave;
     private System.Runtime.InteropServices.PosixSignalRegistration? _sigterm;
     private bool _layoutDirty;
@@ -70,6 +75,21 @@ public sealed class MainWindow : Window
         _tabStrip = new TabControl
         {
             Padding = new Thickness(0),
+        };
+
+        // Trailing pseudo-tab that acts as a "new tab" button.
+        _plusTab = new TabItem
+        {
+            Header = new TextBlock { Text = "+", FontSize = 14, Margin = new Thickness(4, 0) },
+            Content = new Border(),
+        };
+        _tabStrip.Items.Add(_plusTab);
+        _tabStrip.SelectionChanged += (_, _) =>
+        {
+            if (!_restoring && ReferenceEquals(_tabStrip.SelectedItem, _plusTab) && _tabs.Count > 0)
+            {
+                _ = NewTabAsync(null);
+            }
         };
 
         _status = new TextBlock
@@ -304,6 +324,8 @@ public sealed class MainWindow : Window
         else if (ctrlShift && e.Key == Key.W) { ClosePane(); e.Handled = true; }
         else if (ctrlShift && e.Key == Key.O) { _ = SplitAsync(TerminalPaneSplitOrientation.Horizontal); e.Handled = true; }
         else if (ctrlShift && e.Key == Key.E) { _ = SplitAsync(TerminalPaneSplitOrientation.Vertical); e.Handled = true; }
+        else if (ctrlShift && e.Key == Key.PageDown) { MoveTab(1); e.Handled = true; }
+        else if (ctrlShift && e.Key == Key.PageUp) { MoveTab(-1); e.Handled = true; }
         else if (ctrl && e.Key == Key.PageDown) { CycleTab(1); e.Handled = true; }
         else if (ctrl && e.Key == Key.PageUp) { CycleTab(-1); e.Handled = true; }
         else if (ctrl && e.Key is Key.OemPlus or Key.Add) { SetFontSize(_fontSize + 1); e.Handled = true; }
@@ -345,10 +367,13 @@ public sealed class MainWindow : Window
         terminal.TitleChanged += (_, title) => Dispatcher.UIThread.Post(() =>
         {
             Tab? tab = FindTab(terminal);
-            if (tab is not null && ReferenceEquals(tab.Active, terminal))
+            if (tab is not null && ReferenceEquals(tab.Active, terminal)
+                && !string.IsNullOrWhiteSpace(title))
             {
+                tab.TitleFromOsc = true;
                 tab.Header.Text = Shorten(title, 32);
                 UpdateWindowTitle(tab);
+                MarkLayoutDirty();
             }
         });
 
@@ -366,6 +391,12 @@ public sealed class MainWindow : Window
                         MarkLayoutDirty();
                         if (ReferenceEquals(tab.Active, terminal))
                         {
+                            if (!tab.TitleFromOsc)
+                            {
+                                tab.Header.Text = CwdBasename(node.WorkingDirectory);
+                                UpdateWindowTitle(tab);
+                            }
+
                             UpdateStatus(tab);
                         }
                     }
@@ -426,14 +457,72 @@ public sealed class MainWindow : Window
 
     private Tab MakeTab(TerminalPaneNode root, string title)
     {
-        TextBlock header = new() { Text = title, FontSize = 12 };
+        TextBlock header = new()
+        {
+            Text = title,
+            FontSize = 12,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+
+        Button closeButton = new()
+        {
+            Content = "\u00d7",
+            FontSize = 12,
+            Padding = new Thickness(4, 0),
+            Margin = new Thickness(6, 0, 0, 0),
+            Background = Brushes.Transparent,
+            BorderThickness = new Thickness(0),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+
+        StackPanel headerPanel = new()
+        {
+            Orientation = Orientation.Horizontal,
+        };
+        headerPanel.Children.Add(header);
+        headerPanel.Children.Add(closeButton);
+
         Border host = new() { Child = root.Visual };
-        TabItem item = new() { Header = header, Content = host };
+        TabItem item = new() { Header = headerPanel, Content = host };
 
         Tab tab = new() { Item = item, Header = header, Host = host, Root = root };
+        closeButton.Click += (_, _) => CloseTab(tab);
+        item.PointerPressed += (_, e) =>
+        {
+            if (e.GetCurrentPoint(item).Properties.IsMiddleButtonPressed)
+            {
+                CloseTab(tab);
+                e.Handled = true;
+            }
+        };
+
         _tabs.Add(tab);
-        _tabStrip.Items.Add(item);
+        // Keep the "+" pseudo-tab last.
+        _tabStrip.Items.Insert(_tabStrip.Items.Count - 1, item);
         return tab;
+    }
+
+    private void MoveTab(int delta)
+    {
+        Tab? tab = ActiveTab();
+        if (tab is null)
+        {
+            return;
+        }
+
+        int from = _tabs.IndexOf(tab);
+        int to = from + delta;
+        if (to < 0 || to >= _tabs.Count)
+        {
+            return;
+        }
+
+        _tabs.RemoveAt(from);
+        _tabs.Insert(to, tab);
+        _tabStrip.Items.Remove(tab.Item);
+        _tabStrip.Items.Insert(to, tab.Item);
+        _tabStrip.SelectedItem = tab.Item;
+        MarkLayoutDirty();
     }
 
     private void CycleTab(int delta)
@@ -443,9 +532,9 @@ public sealed class MainWindow : Window
             return;
         }
 
-        int index = _tabStrip.SelectedIndex;
+        int index = ActiveTab() is { } current ? _tabs.IndexOf(current) : 0;
         index = (index + delta + _tabs.Count) % _tabs.Count;
-        _tabStrip.SelectedIndex = index;
+        _tabStrip.SelectedItem = _tabs[index].Item;
         _tabs[index].Active?.Focus();
     }
 
@@ -466,7 +555,10 @@ public sealed class MainWindow : Window
         }
         else
         {
-            _tabs[^1].Active?.Focus();
+            // Select explicitly so Avalonia doesn't land on the "+" pseudo-tab.
+            Tab next = _tabs[^1];
+            _tabStrip.SelectedItem = next.Item;
+            next.Active?.Focus();
         }
     }
 
@@ -895,6 +987,23 @@ public sealed class MainWindow : Window
 
     private static string Shorten(string text, int max) =>
         text.Length <= max ? text : text[..(max - 1)] + "…";
+
+    private static string CwdBasename(string? cwd)
+    {
+        if (string.IsNullOrWhiteSpace(cwd))
+        {
+            return "shell";
+        }
+
+        string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        if (string.Equals(Path.TrimEndingDirectorySeparator(cwd), home, StringComparison.Ordinal))
+        {
+            return "~";
+        }
+
+        string name = Path.GetFileName(Path.TrimEndingDirectorySeparator(cwd));
+        return string.IsNullOrEmpty(name) ? cwd : name;
+    }
 
     /// <summary>
     /// Writes a bash rcfile that sources the user's ~/.bashrc and then the
