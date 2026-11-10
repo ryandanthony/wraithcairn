@@ -42,3 +42,17 @@ jobs:
           OUTPUT=$(timeout 90 xvfb-run -a dotnet run -c Release --no-build -- --selftest 2>&1) || true
           echo "$OUTPUT"
           echo "$OUTPUT" | grep -q "SELFTEST phase=restored"
+
+      # Releases ship single-file executables; make sure that packaging still
+      # finds libghostty-vt and can spawn a PTY.
+      - name: Selftest (single-file publish)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          dotnet publish -c Release -r linux-x64 --self-contained true \
+            -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true \
+            -p:DebugType=none -o "$RUNNER_TEMP/single"
+          rm -f ~/.config/wraithcairn/workspace.json
+          OUTPUT=$(cd "$RUNNER_TEMP" && timeout 90 xvfb-run -a "$RUNNER_TEMP/single/wraithcairn" --selftest 2>&1) || true
+          echo "$OUTPUT"
+          echo "$OUTPUT" | grep -q "SELFTEST ghostty=True"
+          echo "$OUTPUT" | grep -q "SELFTEST echo_output_visible=True"

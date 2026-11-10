@@ -25,7 +25,9 @@ Requires the .NET 10 SDK.
 dotnet run
 ```
 
-Local self-contained Linux build to `~/temp/wraithcairn`:
+Local self-contained Linux build, a single `wraithcairn` executable in
+`~/temp/wraithcairn-single` (`--folder` for the classic folder build in
+`~/temp/wraithcairn`):
 
 ```bash
 ./scripts/publish-local.sh
@@ -126,9 +128,17 @@ last screen lines, and exits without saving.
 
 ## Publishing
 
-`.github/workflows/release.yml` publishes on `v*` tags for linux-x64,
-win-x64, osx-arm64 and osx-x64. Builds are self-contained but **not**
-single-file: bundling as a single file breaks `System.Native` loading.
+`.github/workflows/release.yml` publishes on every push to `main` for
+linux-x64, win-x64, osx-arm64 and osx-x64. Each build is one
+self-contained executable. Native libraries (libghostty-vt, Skia,
+HarfBuzz) are bundled and self-extract on first run to the .NET bundle
+cache (`~/.net/wraithcairn/`, or `$DOTNET_BUNDLE_EXTRACT_BASE_DIR`).
+
+The SDK normally leaves `libSystem.Native` out of single-file bundles
+because the host links it statically, but RoyalTerminal's Unix PTY code
+P/Invokes it by name. The `KeepSystemNativeInSingleFile` target in
+`wraithcairn.csproj` puts it back. CI checks the single-file build with
+`--selftest`.
 
 ## License
 

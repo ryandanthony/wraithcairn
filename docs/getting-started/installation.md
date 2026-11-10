@@ -24,12 +24,15 @@ Each release also includes a `SHA256SUMS` file for verifying the
 downloads. Releases are published automatically on every push to `main`:
 GitVersion bumps the patch version by default, or the minor/major version
 if a commit message contains `+semver: minor` / `+semver: major`.
-Builds are self-contained (no .NET runtime install required) but
-**not** single-file — keep the extracted folder together, since bundling
-as a single file breaks `System.Native` loading.
+Builds are self-contained (no .NET runtime install required) and
+single-file. Each archive extracts to a `wraithcairn/` folder holding
+one executable, `wraithcairn` (`wraithcairn.exe` on Windows). Copy it
+anywhere, for example `~/.local/bin`.
 
-Each archive extracts to a `wraithcairn/` folder. Run the `wraithcairn`
-binary inside it (`wraithcairn.exe` on Windows).
+On first run the bundled native libraries (libghostty-vt, Skia,
+HarfBuzz) are extracted to the .NET bundle cache (`~/.net/wraithcairn/`
+on Linux and macOS, `%TEMP%\.net\wraithcairn\` on Windows). Set
+`DOTNET_BUNDLE_EXTRACT_BASE_DIR` to put them somewhere else.
 
 ## Build From Source
 
@@ -48,10 +51,11 @@ dotnet run
 ### Local Self-Contained Build (Linux)
 
 The repo includes a helper script that produces a self-contained Linux
-build under `~/temp/wraithcairn`:
+single-file executable under `~/temp/wraithcairn-single`:
 
 ```bash
-./scripts/publish-local.sh
+./scripts/publish-local.sh            # single file
+./scripts/publish-local.sh --folder   # folder build in ~/temp/wraithcairn
 ```
 
 ## Next Steps

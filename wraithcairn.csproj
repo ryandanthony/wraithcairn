@@ -39,4 +39,28 @@
     <PackageReference Include="RoyalApps.RoyalTerminal.GhosttySharp.Native.OSX" Version="0.7.2" />
   </ItemGroup>
 
+  <!--
+    Single-file publish: the SDK drops libSystem.Native from the bundle
+    because the host links it statically. But the host does not export those
+    symbols, and RoyalTerminal's Unix PTY poller P/Invokes "System.Native"
+    directly, so it would fail with DllNotFoundException. Keep the real
+    shared library in the bundle; it is extracted with the other native libs
+    (IncludeNativeLibrariesForSelfExtract) and found by normal probing.
+  -->
+  <Target Name="KeepSystemNativeInSingleFile"
+          AfterTargets="ComputeResolvedFilesToPublishList"
+          BeforeTargets="_ComputeFilesToBundle;GenerateSingleFileBundle"
+          Condition="'$(PublishSingleFile)' == 'true'">
+    <ItemGroup>
+      <_WcSystemNative Include="@(RuntimePackAsset)"
+                       Condition="'%(Filename)' == 'libSystem.Native'" />
+      <ResolvedFileToPublish Include="@(_WcSystemNative)"
+                             Exclude="@(ResolvedFileToPublish)">
+        <RelativePath>%(Filename)%(Extension)</RelativePath>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+        <AssetType>native</AssetType>
+      </ResolvedFileToPublish>
+    </ItemGroup>
+  </Target>
+
 </Project>
