@@ -225,6 +225,7 @@ public sealed class MainWindow : Window
 
         // Intercept our shortcuts before the terminal control eats the keys.
         AddHandler(KeyDownEvent, OnShortcut, RoutingStrategies.Tunnel);
+        AddHandler(KeyUpEvent, OnControlKeyUp, RoutingStrategies.Tunnel);
 
         Opened += async (_, _) =>
         {
@@ -1074,6 +1075,67 @@ public sealed class MainWindow : Window
                 Console.WriteLine($"SELFTEST ctrl_c_interrupts={wasRunning && intInfo.RunningCommand is null} "
                     + $"was_running={wasRunning} with_selection={hadSelection} handled={ctrlC.Handled} exit={intInfo.LastExitCode}");
 
+                // macOS delivers Ctrl+C with the control byte itself as the key
+                // text (NSEvent.characters = "\u0003") and PhysicalKey set.
+                // Replay that shape here so the Mac path is covered on Linux CI.
+                intPane.SendInput($"sleep 30 # ctrlc-mac-{Guid.NewGuid():N}\n");
+                for (int i = 0; i < 30 && intInfo.RunningCommand is null; i++)
+                {
+                    await Task.Delay(100);
+                }
+
+                bool macWasRunning = intInfo.RunningCommand is not null;
+                KeyEventArgs macCtrlC = new()
+                {
+                    RoutedEvent = KeyDownEvent,
+                    Key = Key.C,
+                    PhysicalKey = PhysicalKey.C,
+                    KeySymbol = "\u0003",
+                    KeyModifiers = KeyModifiers.Control,
+                    Source = intPane,
+                };
+                intPane.RaiseEvent(macCtrlC);
+                for (int i = 0; i < 30 && intInfo.RunningCommand is not null; i++)
+                {
+                    await Task.Delay(100);
+                }
+
+                bool macInterrupted = macWasRunning && intInfo.RunningCommand is null;
+                if (!macInterrupted && intInfo.RunningCommand is not null)
+                {
+                    intPane.SendInput("\u0003"); // clean up for the next checks
+                    await Task.Delay(500);
+                }
+
+                Console.WriteLine($"SELFTEST mac_ctrl_c_interrupts={macInterrupted} was_running={macWasRunning} handled={macCtrlC.Handled}");
+
+                // Every Ctrl+letter in the mac shape: feed them to `od` and
+                // check the bytes the program actually received.
+                string odOut = Path.Combine(Path.GetTempPath(), $"wraithcairn-ctrl-{Environment.ProcessId}.txt");
+                intPane.SendInput($"stty raw -echo; head -c 20 | od -An -tx1 > {odOut}; stty sane\n");
+                await Task.Delay(800);
+                const string letters = "abefghklnoprstuvwxy"; // skip c/d/i/j/m/q/z: signals, EOF, tab, newline, flow control
+                foreach (char letter in letters.Take(20))
+                {
+                    intPane.RaiseEvent(new KeyEventArgs
+                    {
+                        RoutedEvent = KeyDownEvent,
+                        Key = Enum.Parse<Key>(letter.ToString().ToUpperInvariant()),
+                        PhysicalKey = Enum.Parse<PhysicalKey>(letter.ToString().ToUpperInvariant()),
+                        KeySymbol = ((char)(letter & 0x1F)).ToString(),
+                        KeyModifiers = KeyModifiers.Control,
+                        Source = intPane,
+                    });
+                    await Task.Delay(30);
+                }
+
+                intPane.SendInput("\u0001"); // pad to 20 bytes if needed
+                await Task.Delay(800);
+                string expected = string.Join(" ", letters.Select(l => ((int)(l & 0x1F)).ToString("x2")));
+                string got = File.Exists(odOut) ? string.Join(" ", File.ReadAllText(odOut).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)) : "(none)";
+                File.Delete(odOut);
+                Console.WriteLine($"SELFTEST mac_ctrl_letters={got.StartsWith(expected, StringComparison.Ordinal)} got={got}");
+
                 // Ctrl+Shift+C copies the selection; plain Ctrl+V is not paste.
                 Avalonia.Input.Platform.IClipboard? clipboard = Clipboard;
                 if (clipboard is not null)
@@ -1361,12 +1423,45 @@ public sealed class MainWindow : Window
 
     // ----- shortcuts -------------------------------------------------------
 
+    /// <summary>
+    /// macOS (NSEvent.characters) and Windows (ToUnicode) report Ctrl+letter
+    /// with the C0 control byte as the key text, e.g. Ctrl+C as "\u0003".
+    /// RoyalTerminal hands that text to libghostty-vt's key encoder, which only
+    /// maps printable characters to C0 bytes, so it fell through to CSI u and
+    /// sent ESC[3;5u: Ctrl+C, Ctrl+D, Ctrl+R etc. did nothing in the shell.
+    /// Linux already reports "c". Clearing the control text lets the encoder
+    /// use the key itself, which yields 0x03 (and CSI u only when the program
+    /// asked for the Kitty keyboard protocol). Ghostty's own macOS app strips
+    /// these control characters the same way.
+    ///
+    /// The event is fixed in place (KeySymbol is init-only, hence reflection):
+    /// TerminalControl also processes key events already marked handled, so
+    /// replacing the event with a corrected copy would let the original leak.
+    /// </summary>
+    internal static void StripControlKeySymbol(KeyEventArgs e)
+    {
+        if (e.KeyModifiers.HasFlag(KeyModifiers.Control)
+            && e.KeySymbol is { Length: 1 } symbol
+            && (symbol[0] < 0x20 || symbol[0] == 0x7F))
+        {
+            KeySymbolProperty?.SetValue(e, null);
+        }
+    }
+
+    private static readonly System.Reflection.PropertyInfo? KeySymbolProperty =
+        typeof(KeyEventArgs).GetProperty(nameof(KeyEventArgs.KeySymbol));
+
+    private void OnControlKeyUp(object? sender, KeyEventArgs e) => StripControlKeySymbol(e);
+
     private void OnShortcut(object? sender, KeyEventArgs e)
     {
         if (Environment.GetEnvironmentVariable("WRAITHCAIRN_TRACE") == "1")
         {
             Console.WriteLine($"TRACE key {e.Key} mods={e.KeyModifiers} sym={e.KeySymbol} phys={e.PhysicalKey} src={e.Source?.GetType().Name} focus={FocusManager?.GetFocusedElement()?.GetType().Name}");
         }
+
+        // Mac/Windows Ctrl+letter: drop the C0 key text before the terminal sees it.
+        StripControlKeySymbol(e);
 
         bool ctrlShift = e.KeyModifiers.HasFlag(KeyModifiers.Control)
             && e.KeyModifiers.HasFlag(KeyModifiers.Shift);
