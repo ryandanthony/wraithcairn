@@ -22,6 +22,7 @@ namespace Wraithcairn;
 ///   Ctrl+Shift+T        new layout
 ///   Ctrl+Shift+W        close pane (last pane closes the layout)
 ///   Ctrl+Shift+O        split right          Ctrl+Shift+E  split down
+///   Ctrl+Alt+Shift+O    split left           Ctrl+Alt+Shift+E  split up
 ///   Alt+Arrows          move focus between panes
 ///   Ctrl+Alt+Arrows     resize split          Ctrl+Shift+Z  zoom pane
 ///   Ctrl+Shift+=        equalize splits
@@ -414,6 +415,10 @@ public sealed class MainWindow : Window
             () => _ = SplitAsync(TerminalPaneSplitOrientation.Horizontal)));
         pane.Items.Add(Item("Split Down", Gesture(Key.E),
             () => _ = SplitAsync(TerminalPaneSplitOrientation.Vertical)));
+        pane.Items.Add(Item("Split Left", Gesture(Key.O, KeyModifiers.Control | KeyModifiers.Alt | KeyModifiers.Shift),
+            () => _ = SplitAsync(TerminalPaneSplitOrientation.Horizontal, newPaneFirst: true)));
+        pane.Items.Add(Item("Split Up", Gesture(Key.E, KeyModifiers.Control | KeyModifiers.Alt | KeyModifiers.Shift),
+            () => _ = SplitAsync(TerminalPaneSplitOrientation.Vertical, newPaneFirst: true)));
         pane.Items.Add(new Separator());
         pane.Items.Add(Item("Zoom Pane", Gesture(Key.Z), ToggleZoom));
         pane.Items.Add(Item("Equalize Splits", Gesture(Key.OemPlus), EqualizeSplits));
@@ -1222,6 +1227,32 @@ public sealed class MainWindow : Window
                 splitRight.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
                 await Task.Delay(1500);
                 Console.WriteLine($"SELFTEST menu_split_right={tmpTab.Nodes.Count == before + 1}");
+
+                // Split Left / Split Up: the new pane must be the first child
+                // of its split, i.e. left of / above the old one. (Focus may not
+                // move headless, so find the new pane by diffing the node set.)
+                foreach ((string header, TerminalPaneSplitOrientation want) in new[]
+                {
+                    ("Split Left", TerminalPaneSplitOrientation.Horizontal),
+                    ("Split Up", TerminalPaneSplitOrientation.Vertical),
+                })
+                {
+                    MenuItem? item = _menu?.Items.OfType<MenuItem>()
+                        .FirstOrDefault(m => (string?)m.Header == "Pane")?.Items.OfType<MenuItem>()
+                        .FirstOrDefault(m => (string?)m.Header == header);
+                    int count = tmpTab.Nodes.Count;
+                    HashSet<TerminalControl> existing = [.. tmpTab.Nodes.Keys];
+                    item?.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+                    await Task.Delay(1500);
+                    TerminalPaneNode? newNode = tmpTab.Nodes
+                        .FirstOrDefault(kv => !existing.Contains(kv.Key)).Value;
+                    bool placed = newNode?.Parent is { } splitParent
+                        && ReferenceEquals(splitParent.First, newNode)
+                        && splitParent.Second?.Visual is not null
+                        && splitParent.Orientation == want;
+                    string key = header == "Split Left" ? "menu_split_left" : "menu_split_up";
+                    Console.WriteLine($"SELFTEST {key}={item is not null && tmpTab.Nodes.Count == count + 1 && placed}");
+                }
                 SwitchToLayout(_tabs[0]);
             }
             else
@@ -1473,6 +1504,8 @@ public sealed class MainWindow : Window
 
         if (ctrlShift && e.Key == Key.T) { _ = NewTabAsync(null); e.Handled = true; }
         else if (ctrlShift && e.Key == Key.W) { ClosePane(); e.Handled = true; }
+        else if (ctrlShift && alt && e.Key == Key.O) { _ = SplitAsync(TerminalPaneSplitOrientation.Horizontal, newPaneFirst: true); e.Handled = true; }
+        else if (ctrlShift && alt && e.Key == Key.E) { _ = SplitAsync(TerminalPaneSplitOrientation.Vertical, newPaneFirst: true); e.Handled = true; }
         else if (ctrlShift && e.Key == Key.O) { _ = SplitAsync(TerminalPaneSplitOrientation.Horizontal); e.Handled = true; }
         else if (ctrlShift && e.Key == Key.E) { _ = SplitAsync(TerminalPaneSplitOrientation.Vertical); e.Handled = true; }
         else if (ctrlShift && e.Key == Key.Z) { ToggleZoom(); e.Handled = true; }
@@ -1873,6 +1906,10 @@ public sealed class MainWindow : Window
         right.Click += (_, _) => { terminal.Focus(); _ = SplitAsync(TerminalPaneSplitOrientation.Horizontal); };
         MenuItem down = new() { Header = "Split Down" };
         down.Click += (_, _) => { terminal.Focus(); _ = SplitAsync(TerminalPaneSplitOrientation.Vertical); };
+        MenuItem left = new() { Header = "Split Left" };
+        left.Click += (_, _) => { terminal.Focus(); _ = SplitAsync(TerminalPaneSplitOrientation.Horizontal, newPaneFirst: true); };
+        MenuItem up = new() { Header = "Split Up" };
+        up.Click += (_, _) => { terminal.Focus(); _ = SplitAsync(TerminalPaneSplitOrientation.Vertical, newPaneFirst: true); };
         MenuItem close = new() { Header = "Close Pane" };
         close.Click += (_, _) => ClosePane(terminal);
 
@@ -1885,6 +1922,8 @@ public sealed class MainWindow : Window
         menu.Items.Add(new Separator());
         menu.Items.Add(right);
         menu.Items.Add(down);
+        menu.Items.Add(left);
+        menu.Items.Add(up);
         menu.Items.Add(new Separator());
         menu.Items.Add(close);
 
@@ -2060,7 +2099,11 @@ public sealed class MainWindow : Window
 
     // ----- splits ----------------------------------------------------------
 
-    private async Task SplitAsync(TerminalPaneSplitOrientation orientation)
+    /// <summary>
+    /// Splits the active pane. Horizontal puts the new pane right (or left
+    /// with <paramref name="newPaneFirst"/>), Vertical puts it below (or above).
+    /// </summary>
+    private async Task SplitAsync(TerminalPaneSplitOrientation orientation, bool newPaneFirst = false)
     {
         Tab? tab = ActiveTab();
         if (tab?.Active is not TerminalControl activeControl
@@ -2101,9 +2144,11 @@ public sealed class MainWindow : Window
             DetachFromParent(oldVisual);
         }
 
+        TerminalPaneNode first = newPaneFirst ? newLeaf : activeNode;
+        TerminalPaneNode second = newPaneFirst ? activeNode : newLeaf;
         Grid grid = TerminalPaneLayout.CreateSplitGrid(
-            orientation, 0.5, activeNode.Visual, newLeaf.Visual);
-        splitNode.SetSplit(orientation, 0.5, activeNode, newLeaf, grid);
+            orientation, 0.5, first.Visual, second.Visual);
+        splitNode.SetSplit(orientation, 0.5, first, second, grid);
 
         if (activeNode.Parent is null || parentGrid is null)
         {

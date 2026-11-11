@@ -24,6 +24,7 @@ are picked up automatically (see
 
 - `Ctrl+Shift+O` splits the focused pane to the right
 - `Ctrl+Shift+E` splits the focused pane down
+- `Ctrl+Alt+Shift+O` / `Ctrl+Alt+Shift+E` split left / up instead
 - `Alt+Arrows` moves focus between panes
 - `Ctrl+Alt+Arrows` resizes the focused split
 - `Ctrl+Shift+=` equalizes all splits in the layout

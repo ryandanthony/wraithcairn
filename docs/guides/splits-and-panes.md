@@ -13,6 +13,8 @@ that area.
 
 - `Ctrl+Shift+O` splits the focused pane **right**
 - `Ctrl+Shift+E` splits the focused pane **down**
+- `Ctrl+Alt+Shift+O` splits the focused pane **left**
+- `Ctrl+Alt+Shift+E` splits the focused pane **up**
 
 The new pane starts as a plain shell unless you configure its startup (see
 [Per-Pane Startup](/docs/guides/per-pane-startup)).
@@ -76,6 +78,8 @@ actions available from the keyboard or **Pane** menu:
 - **Restart Pane**
 - **Split Right**
 - **Split Down**
+- **Split Left**
+- **Split Up**
 - **Close Pane**
 
 ## See Also

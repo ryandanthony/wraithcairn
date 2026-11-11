@@ -15,6 +15,8 @@ Every shortcut below is also available from the menu bar (**Shell**,
 | `Ctrl+Shift+W` | Close pane (closes the layout if it's the last pane) |
 | `Ctrl+Shift+O` | Split right |
 | `Ctrl+Shift+E` | Split down |
+| `Ctrl+Alt+Shift+O` | Split left |
+| `Ctrl+Alt+Shift+E` | Split up |
 | `Alt+Arrows` | Move focus between panes |
 | `Ctrl+Alt+Arrows` | Resize split |
 | `Ctrl+Shift+Z` | Zoom pane |

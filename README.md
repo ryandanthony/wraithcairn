@@ -100,6 +100,7 @@ Saved 5 s after layout changes, on window close, and on exit/SIGTERM/SIGINT.
 | `Ctrl+Shift+N` | New window |
 | `Ctrl+Shift+W` | Close pane (closes the layout if it's the last pane) |
 | `Ctrl+Shift+O` / `Ctrl+Shift+E` | Split right / down |
+| `Ctrl+Alt+Shift+O` / `Ctrl+Alt+Shift+E` | Split left / up |
 | `Alt+Arrows` | Move focus between panes |
 | `Ctrl+Alt+Arrows` | Resize split |
 | `Ctrl+Shift+Z` | Zoom pane |
