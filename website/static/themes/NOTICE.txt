@@ -1,0 +1,5 @@
+These 819 color themes mirror the themes bundled with Ghostty 1.4.0
+(https://ghostty.org), which come from the iTerm2-Color-Schemes project
+(https://github.com/mbadolato/iTerm2-Color-Schemes), MIT licensed.
+Each theme's colors belong to its original author. Regenerate with
+scripts/sync-ghostty-themes.py.

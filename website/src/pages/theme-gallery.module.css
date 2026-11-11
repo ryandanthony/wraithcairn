@@ -1,0 +1,121 @@
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  margin: 1.5rem 0 0.5rem;
+}
+
+.search {
+  flex: 1 1 260px;
+  max-width: 360px;
+  padding: 0.45rem 0.75rem;
+  border-radius: 6px;
+  border: 1px solid var(--ifm-color-emphasis-300);
+  background: var(--ifm-background-surface-color);
+  color: var(--ifm-font-color-base);
+  font-size: 0.95rem;
+}
+
+.filters {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.count {
+  color: var(--ifm-color-emphasis-600);
+  font-size: 0.9rem;
+}
+
+.error {
+  color: var(--ifm-color-danger);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 1rem;
+}
+
+.card {
+  border: 1px solid var(--ifm-color-emphasis-200);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--ifm-background-surface-color);
+}
+
+.preview {
+  margin: 0;
+  border-radius: 0;
+  padding: 0.75rem 0.9rem;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  white-space: pre;
+  overflow: hidden;
+}
+
+.cursor {
+  display: inline-block;
+  width: 0.6em;
+}
+
+.cardBody {
+  padding: 0.6rem 0.9rem 0.75rem;
+}
+
+.cardTitle {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.badge {
+  font-size: 0.7rem;
+  color: var(--ifm-color-emphasis-600);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.swatches {
+  display: grid;
+  grid-template-columns: repeat(16, 1fr);
+  gap: 2px;
+  margin: 0.5rem 0;
+}
+
+.swatch {
+  height: 12px;
+  border-radius: 2px;
+}
+
+.cardActions {
+  display: flex;
+  gap: 1rem;
+  font-size: 0.85rem;
+}
+
+.linkButton {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--ifm-link-color);
+  cursor: pointer;
+  font: inherit;
+}
+
+.linkButton:hover {
+  text-decoration: underline;
+}
+
+.more {
+  display: flex;
+  justify-content: center;
+  margin: 1.5rem 0;
+}
+
+.notice {
+  margin-top: 2rem;
+  font-size: 0.8rem;
+  color: var(--ifm-color-emphasis-600);
+}

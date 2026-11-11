@@ -11,6 +11,9 @@ title: Command Line
 | `--selftest` | Headless self-test: builds a layout, checks the Ghostty engine, GPU, search, splits, layout switching, and save/open, then saves and exits. Running it a second time additionally checks restore. Prints `SELFTEST key=value` lines. **Overwrites `workspace.json`.** Used by CI (see `.github/workflows/ci.yml`), run twice headless. |
 | `--dump-panes` | Restores the current layout, prints each pane's startup configuration, working directory, and last screen lines, then exits **without saving**. Useful for inspecting saved state without risking a write. |
 | `--configure-pane` | Opens straight to the **Configure Pane** dialog for the focused/primary pane on launch. |
+| `--list-themes` | Lists every available theme (online catalog plus local ones); `*` marks downloaded ones. No window. |
+| `--download-themes` | Downloads every theme to `themes/` so they all work offline. No window. |
+| `--set-theme NAME` | Downloads `NAME` if needed and saves it as `theme` in `config.json`. `--set-theme ghostty` clears it (inherit Ghostty's). Running instances repaint immediately. No window. |
 | `--version` / `-v` | Prints `wraithcairn <version>` and exits. |
 | `--install-desktop` | Linux: writes `~/.local/share/applications/wraithcairn.desktop` and icons pointing at this binary, so it gets its own task manager entry and appears in the launcher. Normal launches do this automatically. |
 | `--uninstall-desktop` | Linux: removes that desktop entry and its icons. |
@@ -29,6 +32,9 @@ wraithcairn --dump-panes
 
 # Headless sanity check, e.g. in CI
 wraithcairn --selftest
+
+# Switch every open window to a new theme
+wraithcairn --set-theme "Catppuccin Mocha"
 
 # Print the version and exit
 wraithcairn --version

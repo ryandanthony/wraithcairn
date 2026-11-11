@@ -10,6 +10,7 @@ using RoyalTerminal.Avalonia.Controls;
 using RoyalTerminal.Avalonia.Services;
 using RoyalTerminal.Terminal;
 using RoyalTerminal.Terminal.Services;
+using RoyalTerminal.Terminal.Theming;
 
 namespace Wraithcairn;
 
@@ -187,9 +188,7 @@ public sealed class MainWindow : Window
             : "wraithcairn";
         Width = 1200;
         Height = 800;
-        Background = Config.ResolvedTheme is { } chromeTheme
-            ? new SolidColorBrush(Color.FromUInt32(chromeTheme.DefaultBackground))
-            : new SolidColorBrush(Color.Parse("#1e1e2e"));
+        Background = ChromeBrush();
 
         _layoutHost = new ContentControl
         {
@@ -336,6 +335,11 @@ public sealed class MainWindow : Window
             }
         };
 
+        if (_isPrimary)
+        {
+            StartConfigWatcher();
+        }
+
         // Save on SIGTERM / SIGINT (systemd stop, kill, Ctrl+C from launcher)
         // and on normal process exit. SaveWorkspace marshals itself onto the
         // UI thread when called from a POSIX signal thread. Only the primary
@@ -462,6 +466,8 @@ public sealed class MainWindow : Window
             () => SetFontSize(_fontSize + 1)));
         view.Items.Add(Item("Smaller Text", Gesture(Key.OemMinus, KeyModifiers.Control),
             () => SetFontSize(_fontSize - 1)));
+        view.Items.Add(new Separator());
+        view.Items.Add(Item("Themes…", null, () => _ = ShowThemesAsync()));
         view.Items.Add(new Separator());
         MenuItem about = new() { Header = $"About wraithcairn {AppInfo.Version}…" };
         about.Click += async (_, _) => await AppInfo.ShowAboutAsync(this);
@@ -1340,6 +1346,8 @@ public sealed class MainWindow : Window
             Startups.Remove(firstPaneId);
             NamedLayouts.Delete(probe);
             SaveWorkspace();
+
+            await RunThemeSelfTestAsync();
         }
         _shuttingDown = true;
         foreach (MainWindow window in Windows.ToArray())
@@ -1351,6 +1359,163 @@ public sealed class MainWindow : Window
         }
 
         Close();
+    }
+
+    /// <summary>
+    /// Selftest for themes: catalog load, live preview, download + apply
+    /// (saved to config.json, repainted without restart, new panes follow),
+    /// cancel reverts the preview, Download All, and a hand edit of
+    /// config.json being picked up live. Uses the repo's
+    /// website/static/themes when present (no network); restores config.json
+    /// and removes the theme files it added.
+    /// </summary>
+    private async Task RunThemeSelfTestAsync()
+    {
+        string repoThemes = Path.GetFullPath(Path.Combine("website", "static", "themes"));
+        if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("WRAITHCAIRN_THEMES_URL"))
+            && File.Exists(Path.Combine(repoThemes, "index.json")))
+        {
+            Environment.SetEnvironmentVariable("WRAITHCAIRN_THEMES_URL", repoThemes);
+        }
+
+        Tab? tab = ActiveTab();
+        TerminalControl? pane = tab?.Active;
+        if (tab is null || pane is null)
+        {
+            Console.WriteLine("SELFTEST themes=skipped (no pane)");
+            return;
+        }
+
+        string? originalConfig = File.Exists(AppConfig.AppConfigPath) ? File.ReadAllText(AppConfig.AppConfigPath) : null;
+        HashSet<string> themesBefore = Directory.Exists(AppConfig.UserThemesDir)
+            ? [.. Directory.GetFiles(AppConfig.UserThemesDir)]
+            : [];
+        string? themeBefore = Config.Theme;
+        int reloadsBefore = s_configReloads;
+
+        ThemeDialog dialog = new(ChromeBrush());
+        try
+        {
+            dialog.Show(this);
+            await dialog.CatalogLoaded.WaitAsync(TimeSpan.FromSeconds(30));
+            ThemeCatalog.CatalogResult? catalog = dialog.Catalog;
+            int count = catalog?.Themes.Count(t => t.InCatalog) ?? 0;
+            Console.WriteLine($"SELFTEST theme_catalog={count >= 800} count={count} online={catalog?.Online} source={ThemeCatalog.BaseUrl}");
+            if (catalog is null || count == 0)
+            {
+                return;
+            }
+
+            // Pick two catalog themes that are not the current one.
+            string[] picks = [.. new[] { "Dracula", "Nord", "Gruvbox Dark", "Catppuccin Mocha" }
+                .Where(n => n != themeBefore && catalog.Themes.Any(t => t.Name == n && t.InCatalog))];
+            ThemeEntry first = catalog.Themes.First(t => t.Name == picks[0]);
+            ThemeEntry second = catalog.Themes.First(t => t.Name == picks[1]);
+
+            uint Bg(TerminalControl c) => c.Theme?.DefaultBackground ?? 0;
+            uint Expected(ThemeEntry e) => e.ToTerminalTheme().DefaultBackground;
+
+            dialog.Search(first.Name[..3]);
+            bool searched = dialog.VisibleCount > 0 && dialog.VisibleCount < count;
+            bool selected = dialog.Select(first.Name);
+            await Task.Delay(150);
+            bool previewed = Bg(pane) == Expected(first);
+            await Task.Delay(300);
+            SnapshotControl(dialog, "/tmp/wraithcairn-selftest-themes-dialog.png");
+            Console.WriteLine($"SELFTEST theme_preview={selected && previewed} search={searched}");
+
+            // Download + apply: file installed, config.json updated (comments
+            // kept), every pane and header repainted, no restart.
+            string firstFile = Path.Combine(AppConfig.UserThemesDir, first.Name);
+            if (!themesBefore.Contains(firstFile))
+            {
+                File.Delete(firstFile);
+            }
+            bool applied = await dialog.ApplySelectedAsync();
+            await Task.Delay(150);
+            string configText = File.Exists(AppConfig.AppConfigPath) ? File.ReadAllText(AppConfig.AppConfigPath) : string.Empty;
+            bool downloaded = File.Exists(Path.Combine(AppConfig.UserThemesDir, first.Name));
+            bool saved = configText.Contains($"\"theme\": {System.Text.Json.JsonSerializer.Serialize(first.Name)}", StringComparison.Ordinal)
+                && AppConfig.Load(writeDefault: false).Theme == first.Name;
+            bool commentsKept = originalConfig is null || !originalConfig.Contains("//", StringComparison.Ordinal)
+                || configText.Contains("//", StringComparison.Ordinal);
+            bool allPanes = Windows.All(w => w._tabs.All(t => t.Nodes.Keys.All(c => Bg(c) == Expected(first))));
+            bool chrome = Background is SolidColorBrush sb && sb.Color.ToUInt32() == Expected(first);
+            Console.WriteLine($"SELFTEST theme_apply={applied && Config.Theme == first.Name && allPanes && chrome} "
+                + $"downloaded={downloaded} saved={saved} comments_kept={commentsKept}");
+
+            // New panes pick up the live theme too.
+            HashSet<TerminalControl> existing = [.. tab.Nodes.Keys];
+            int panesBefore = tab.Nodes.Count;
+            tab.Active = pane;
+            await SplitAsync(TerminalPaneSplitOrientation.Horizontal);
+            TerminalControl? fresh = tab.Nodes.Keys.FirstOrDefault(c => !existing.Contains(c));
+            bool freshHeader = fresh is not null && _panes.TryGetValue(fresh, out PaneInfo? freshInfo)
+                && freshInfo.Header.Background is SolidColorBrush hb && hb.Color != Color.Parse("#1e1e2e");
+            Console.WriteLine($"SELFTEST theme_new_pane={fresh is not null && Bg(fresh) == Expected(first) && freshHeader}");
+            if (fresh is not null)
+            {
+                ClosePane(fresh);
+                tab.Active = pane;
+            }
+
+            Console.WriteLine($"SELFTEST theme_new_pane_closed={tab.Nodes.Count == panesBefore}");
+
+            // Preview something else, then close without applying: reverts.
+            dialog.Select(second.Name);
+            await Task.Delay(150);
+            bool secondPreviewed = Bg(pane) == Expected(second);
+            dialog.Close();
+            await Task.Delay(150);
+            Console.WriteLine($"SELFTEST theme_cancel_reverts={secondPreviewed && Bg(pane) == Expected(first) && Config.Theme == first.Name}");
+
+            // Download All.
+            dialog = new ThemeDialog(ChromeBrush());
+            dialog.Show(this);
+            await dialog.CatalogLoaded.WaitAsync(TimeSpan.FromSeconds(30));
+            int written = await dialog.DownloadAllAsync();
+            int onDisk = Directory.Exists(AppConfig.UserThemesDir) ? Directory.GetFiles(AppConfig.UserThemesDir).Length : 0;
+            Console.WriteLine($"SELFTEST theme_download_all={written >= 800 && onDisk >= written} written={written}");
+            dialog.Close();
+            await Task.Delay(100);
+
+            // Hand-edit config.json: the watcher applies it live.
+            File.WriteAllText(AppConfig.AppConfigPath,
+                Jsonc.SetTopLevelProperty(File.ReadAllText(AppConfig.AppConfigPath), "theme",
+                    System.Text.Json.JsonSerializer.Serialize(second.Name)));
+            bool watched = false;
+            for (int i = 0; i < 40 && !watched; i++)
+            {
+                await Task.Delay(100);
+                watched = Config.Theme == second.Name && Bg(pane) == Expected(second);
+            }
+
+            Console.WriteLine($"SELFTEST theme_watch_config={watched} reloads={s_configReloads - reloadsBefore}");
+            SnapshotWindow("/tmp/wraithcairn-selftest-theme.png");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"SELFTEST themes=error {ex}");
+        }
+        finally
+        {
+            dialog.Close();
+            if (originalConfig is not null)
+            {
+                File.WriteAllText(AppConfig.AppConfigPath, originalConfig);
+            }
+
+            if (Directory.Exists(AppConfig.UserThemesDir))
+            {
+                foreach (string file in Directory.GetFiles(AppConfig.UserThemesDir).Where(f => !themesBefore.Contains(f)))
+                {
+                    File.Delete(file);
+                }
+            }
+
+            ReloadThemeFromDisk();
+            Console.WriteLine($"SELFTEST theme_restored={Config.Theme == themeBefore}");
+        }
     }
 
     /// <summary>
@@ -1611,7 +1776,7 @@ public sealed class MainWindow : Window
             terminal.FontFamilyName = Config.FontFamily;
         }
 
-        if (Config.ResolvedTheme is { } theme)
+        if ((s_paintedTheme ?? Config.ResolvedTheme) is { } theme)
         {
             terminal.ApplyTheme(theme);
         }
@@ -1852,12 +2017,7 @@ public sealed class MainWindow : Window
             workingDirectory: cwd,
             transportId: TerminalTransportIds.Pty);
 
-        Color background = Config.ResolvedTheme is { } theme
-            ? Color.FromUInt32(theme.DefaultBackground)
-            : Color.Parse("#1e1e2e");
-        Color foreground = Config.ResolvedTheme is { } fgTheme
-            ? Color.FromUInt32(fgTheme.DefaultForeground)
-            : Color.Parse("#cdd6f4");
+        (Color background, Color foreground) = HeaderColors(s_paintedTheme ?? Config.ResolvedTheme);
         PaneHeader header = new(background, foreground);
         DockPanel.SetDock(header, Dock.Top);
 
@@ -3036,6 +3196,175 @@ public sealed class MainWindow : Window
                 control.TerminalFontSize = _fontSize;
             }
         }
+    }
+
+    // ----- themes (applied live, no restart) -------------------------------
+
+    private static readonly TerminalTheme FallbackTheme = TerminalTheme.Dark;
+
+    /// <summary>Theme currently painted (resolved config theme, or a picker preview).</summary>
+    private static TerminalTheme? s_paintedTheme;
+    private static string s_paintedFingerprint = AppConfig.Fingerprint(Config.ResolvedTheme);
+
+    private static (Color Background, Color Foreground) HeaderColors(TerminalTheme? theme) =>
+        theme is null
+            ? (Color.Parse("#1e1e2e"), Color.Parse("#cdd6f4"))
+            : (Color.FromUInt32(theme.DefaultBackground), Color.FromUInt32(theme.DefaultForeground));
+
+    private static IBrush ChromeBrush(TerminalTheme? theme = null) =>
+        new SolidColorBrush(HeaderColors(theme ?? s_paintedTheme ?? Config.ResolvedTheme).Background);
+
+    /// <summary>Name of the theme in effect, for the picker and status.</summary>
+    internal static string? CurrentThemeName => Config.Theme;
+
+    /// <summary>True when config.json sets the theme (false = inherited from Ghostty).</summary>
+    internal static bool ThemeFromAppConfig => Config.AppTheme is not null;
+
+    /// <summary>Repaints every pane, header and window of every open window.</summary>
+    private static void PaintThemeEverywhere(TerminalTheme? theme)
+    {
+        string fingerprint = AppConfig.Fingerprint(theme);
+        if (fingerprint == s_paintedFingerprint)
+        {
+            return;
+        }
+
+        s_paintedFingerprint = fingerprint;
+        s_paintedTheme = theme;
+        foreach (MainWindow window in Windows.ToArray())
+        {
+            window.PaintTheme(theme);
+        }
+    }
+
+    private void PaintTheme(TerminalTheme? theme)
+    {
+        Background = ChromeBrush(theme);
+        (Color background, Color foreground) = HeaderColors(theme);
+        foreach (Tab tab in _tabs)
+        {
+            foreach (TerminalControl control in tab.Nodes.Keys)
+            {
+                control.ApplyTheme(theme ?? FallbackTheme);
+                if (_panes.TryGetValue(control, out PaneInfo? info))
+                {
+                    info.Header.SetColors(background, foreground);
+                }
+            }
+        }
+    }
+
+    /// <summary>Shows a theme on every pane without saving it (picker preview).</summary>
+    internal static void PreviewTheme(TerminalTheme theme) => PaintThemeEverywhere(theme);
+
+    /// <summary>Drops any preview and repaints the configured theme.</summary>
+    internal static void EndThemePreview() => PaintThemeEverywhere(Config.ResolvedTheme);
+
+    /// <summary>
+    /// Switches to a theme now (null = back to the Ghostty config's theme)
+    /// and, when <paramref name="persist"/>, saves it as "theme" in
+    /// config.json. The theme must be installed locally (downloaded or in a
+    /// Ghostty theme folder). Returns false if the config could not be saved.
+    /// </summary>
+    internal static bool SetThemeLive(string? name, bool persist = true)
+    {
+        Config.SetTheme(name);
+        PaintThemeEverywhere(Config.ResolvedTheme);
+        foreach (MainWindow window in Windows)
+        {
+            if (window.ActiveTab() is { } tab)
+            {
+                window.UpdateStatus(tab);
+            }
+        }
+
+        return !persist || AppConfig.SaveThemeSetting(Config.AppTheme);
+    }
+
+    // Watches config.json, the Ghostty config, and the user theme folder so
+    // hand edits (or another wraithcairn instance) change the theme live.
+    private static readonly List<FileSystemWatcher> ConfigWatchers = [];
+    private static DispatcherTimer? s_configDebounce;
+    private static int s_configReloads;
+
+    private static void StartConfigWatcher()
+    {
+        if (ConfigWatchers.Count > 0 || Environment.GetCommandLineArgs().Contains("--dump-panes"))
+        {
+            return;
+        }
+
+        s_configDebounce = new DispatcherTimer(TimeSpan.FromMilliseconds(300), DispatcherPriority.Background, (_, _) =>
+        {
+            s_configDebounce!.Stop();
+            ReloadThemeFromDisk();
+        });
+
+        void Watch(string dir, string filter)
+        {
+            try
+            {
+                Directory.CreateDirectory(dir);
+                FileSystemWatcher watcher = new(dir, filter)
+                {
+                    NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.Size | NotifyFilters.CreationTime,
+                    EnableRaisingEvents = true,
+                };
+                FileSystemEventHandler poke = (_, _) => Dispatcher.UIThread.Post(() =>
+                {
+                    s_configDebounce!.Stop();
+                    s_configDebounce.Start();
+                });
+                watcher.Changed += poke;
+                watcher.Created += poke;
+                watcher.Deleted += poke;
+                watcher.Renamed += (s, e) => poke(s, e);
+                ConfigWatchers.Add(watcher);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"config watch failed for {dir}: {ex.Message}");
+            }
+        }
+
+        Watch(AppConfig.ConfigDir, "config.json");
+        Watch(AppConfig.UserThemesDir, "*");
+        if (Config.UseGhosttyConfig && Path.GetDirectoryName(AppConfig.GhosttyConfigFile) is { } ghosttyDir
+            && Directory.Exists(ghosttyDir))
+        {
+            Watch(ghosttyDir, "config");
+        }
+    }
+
+    /// <summary>Re-reads the theme settings from disk and repaints if they changed.</summary>
+    private static void ReloadThemeFromDisk()
+    {
+        try
+        {
+            AppConfig fresh = AppConfig.Load(writeDefault: false);
+            Config.AdoptThemeFrom(fresh);
+            s_configReloads++;
+            if (!ThemeDialog.IsOpen)
+            {
+                PaintThemeEverywhere(Config.ResolvedTheme);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"config reload failed: {ex.Message}");
+        }
+    }
+
+    private async Task ShowThemesAsync()
+    {
+        if (ThemeDialog.IsOpen)
+        {
+            return;
+        }
+
+        ThemeDialog dialog = new(ChromeBrush());
+        await dialog.ShowDialog(this);
+        ActiveTab()?.Active?.Focus();
     }
 
     private static void StopQuietly(TerminalControl control)

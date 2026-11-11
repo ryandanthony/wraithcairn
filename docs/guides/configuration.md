@@ -25,7 +25,7 @@ all).
 |---|---|---|---|
 | `fontFamily` | string | from Ghostty / built-in | Terminal font family. |
 | `fontSize` | number | `11` (or from Ghostty) | Terminal font size. |
-| `theme` | string | from Ghostty / built-in | A Ghostty theme name, e.g. `"GitHub Dark Dimmed"`. |
+| `theme` | string or `null` | from Ghostty / built-in | A Ghostty theme name, e.g. `"GitHub Dark Dimmed"`. Set from **View → Themes…** or `--set-theme`; applied live. `null` = use Ghostty's. See [Themes](/docs/guides/themes). |
 | `copyOnSelect` | boolean | `false` (or from Ghostty) | Copy a selection to the clipboard automatically. |
 | `restoreLayout` | boolean | `true` | Restore the saved workspace on launch. `false` always starts fresh. |
 | `restoreScrollback` | boolean | `false` | Also save/replay each pane's scrollback (see below). |
@@ -39,9 +39,14 @@ inherited from the Ghostty layer.
 ## Themes by Name
 
 Setting `theme` (in either the Ghostty config or `config.json`) looks the
-name up in the usual Ghostty theme directories — user, system, and an
-extracted AppImage copy — so a Ghostty theme name such as
-`"GitHub Dark Dimmed"` just works without copying any files.
+name up in the usual Ghostty theme directories (user and system) plus
+`~/.config/wraithcairn/themes/`, where **View → Themes…** downloads them.
+So a Ghostty theme name such as `"GitHub Dark Dimmed"` just works.
+
+The theme is the one setting that applies live: change it in the Themes
+dialog, with `--set-theme`, or by editing `config.json` (or the Ghostty
+config) and every open pane repaints without a restart. See
+[Themes](/docs/guides/themes).
 
 ## Copy on Select
 

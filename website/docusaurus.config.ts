@@ -64,6 +64,11 @@ const config: Config = {
           label: 'Docs',
         },
         {
+          to: '/theme-gallery',
+          label: 'Themes',
+          position: 'left',
+        },
+        {
           href: 'https://github.com/ryandanthony/wraithcairn',
           label: 'GitHub',
           position: 'right',

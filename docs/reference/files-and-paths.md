@@ -18,7 +18,9 @@ All of Wraithcairn's own state lives under one config directory per OS:
 |---|---|
 | `workspace.json` | The default workspace: open windows, layouts, splits, ratios, and per-pane working directory + startup. |
 | `layouts/NAME.json` | Saved layouts, written by **Save Layout As...** and loaded by **Open Saved Layout**. Also the workspace file used by `--workspace NAME`. |
-| `config.json` | App settings (see [Configuration](/docs/guides/configuration)). |
+| `config.json` | App settings (see [Configuration](/docs/guides/configuration)). Watched: theme changes apply live. |
+| `themes/` | Downloaded color themes, one Ghostty-format file per theme (see [Themes](/docs/guides/themes)). |
+| `theme-catalog.json` | Cached copy of the online theme list, so the Themes dialog works offline. |
 | `scrollback/` | Per-pane scrollback files (`{paneId}.vt`), only written when `restoreScrollback` is enabled. Scoped under a per-workspace subfolder when running with `--workspace NAME`. |
 
 ## Save Timing

@@ -25,10 +25,11 @@ public sealed class PaneHeader : Border
     private readonly Run _grip;
     private readonly Run _title;
     private readonly Run _context;
-    private readonly IBrush _idleBackground;
-    private readonly IBrush _activeBackground;
-    private readonly IBrush _titleBrush;
-    private readonly IBrush _contextBrush;
+    private IBrush _idleBackground = Brushes.Transparent;
+    private IBrush _activeBackground = Brushes.Transparent;
+    private IBrush _titleBrush = Brushes.White;
+    private IBrush _contextBrush = Brushes.Gray;
+    private bool _active;
 
     private Point? _pressPoint;
     private bool _dragging;
@@ -50,14 +51,9 @@ public sealed class PaneHeader : Border
 
     public PaneHeader(Color background, Color foreground)
     {
-        _idleBackground = new SolidColorBrush(Mix(background, Colors.White, 0.07));
-        _activeBackground = new SolidColorBrush(Mix(background, Color.Parse("#89b4fa"), 0.28));
-        _titleBrush = new SolidColorBrush(foreground);
-        _contextBrush = new SolidColorBrush(Mix(foreground, background, 0.45));
-
-        _grip = new Run("\u283f ") { Foreground = _contextBrush };
-        _title = new Run { Foreground = _titleBrush, FontWeight = FontWeight.SemiBold };
-        _context = new Run { Foreground = _contextBrush };
+        _grip = new Run("\u283f ");
+        _title = new Run { FontWeight = FontWeight.SemiBold };
+        _context = new Run();
 
         _text = new TextBlock
         {
@@ -72,9 +68,22 @@ public sealed class PaneHeader : Border
 
         Child = _text;
         Padding = new Thickness(6, 2);
-        Background = _idleBackground;
+        SetColors(background, foreground);
         Cursor = new Cursor(StandardCursorType.Hand);
         ToolTip.SetTip(this, "Drag onto another pane to swap. Double-click to zoom.");
+    }
+
+    /// <summary>Recolors the bar from the terminal theme (live theme switch).</summary>
+    public void SetColors(Color background, Color foreground)
+    {
+        _idleBackground = new SolidColorBrush(Mix(background, Colors.White, 0.07));
+        _activeBackground = new SolidColorBrush(Mix(background, Color.Parse("#89b4fa"), 0.28));
+        _titleBrush = new SolidColorBrush(foreground);
+        _contextBrush = new SolidColorBrush(Mix(foreground, background, 0.45));
+        _grip.Foreground = _contextBrush;
+        _title.Foreground = _titleBrush;
+        _context.Foreground = _contextBrush;
+        Background = _active ? _activeBackground : _idleBackground;
     }
 
     public string TitleText => _title.Text ?? string.Empty;
@@ -92,7 +101,11 @@ public sealed class PaneHeader : Border
         _context.Text = string.IsNullOrEmpty(context) ? string.Empty : "   " + context;
     }
 
-    public void SetActive(bool active) => Background = active ? _activeBackground : _idleBackground;
+    public void SetActive(bool active)
+    {
+        _active = active;
+        Background = active ? _activeBackground : _idleBackground;
+    }
 
     protected override void OnPointerPressed(PointerPressedEventArgs e)
     {

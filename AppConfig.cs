@@ -46,6 +46,16 @@ public sealed class AppConfig
     [JsonIgnore]
     public TerminalTheme? ResolvedTheme { get; private set; }
 
+    /// <summary>Theme set by config.json (null = inherit the Ghostty layer's theme).</summary>
+    [JsonIgnore]
+    public string? AppTheme => _appTheme;
+
+    // Ghostty-layer theme bits, kept so the theme can be swapped live (and
+    // reset back to Ghostty's) without re-reading every setting.
+    private string? _appTheme;
+    private string? _ghosttyTheme;
+    private Dictionary<string, string> _ghosttyInline = new(StringComparer.Ordinal);
+
     /// <summary>Where each setting came from, for the status bar / selftest.</summary>
     [JsonIgnore]
     public List<string> Sources { get; } = [];
@@ -65,7 +75,12 @@ public sealed class AppConfig
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     };
 
-    public static AppConfig Load()
+    /// <summary>Downloaded themes (theme picker, --download-themes) go here.</summary>
+    public static string UserThemesDir => Path.Combine(ConfigDir, "themes");
+
+    public static AppConfig Load() => Load(writeDefault: true);
+
+    public static AppConfig Load(bool writeDefault)
     {
         AppConfig config = new();
         Dictionary<string, string> themeKeys = new(StringComparer.Ordinal);
@@ -78,6 +93,9 @@ public sealed class AppConfig
             config.ApplyGhosttyConfig(themeKeys);
         }
 
+        config._ghosttyTheme = config.Theme;
+        config._ghosttyInline = new Dictionary<string, string>(themeKeys, StringComparer.Ordinal);
+
         if (appOverrides is not null)
         {
             if (appOverrides.FontFamily is not null) config.FontFamily = appOverrides.FontFamily;
@@ -85,6 +103,7 @@ public sealed class AppConfig
             if (appOverrides.Theme is not null)
             {
                 config.Theme = appOverrides.Theme;
+                config._appTheme = appOverrides.Theme;
                 themeKeys.Clear(); // app theme replaces any inline ghostty colors
             }
 
@@ -96,7 +115,7 @@ public sealed class AppConfig
             if (appOverrides.Shell is not null) config.Shell = appOverrides.Shell;
             config.Sources.Add(AppConfigPath);
         }
-        else
+        else if (writeDefault)
         {
             WriteDefaultAppConfig();
         }
@@ -174,6 +193,89 @@ public sealed class AppConfig
         {
             // non-fatal
         }
+    }
+
+    // ----- live theme changes ---------------------------------------------
+
+    /// <summary>
+    /// Switches the theme in memory: a name overrides the Ghostty layer (like
+    /// "theme" in config.json), null falls back to Ghostty's theme and inline
+    /// colors. Updates <see cref="ResolvedTheme"/>; callers repaint.
+    /// </summary>
+    public void SetTheme(string? appTheme)
+    {
+        _appTheme = string.IsNullOrWhiteSpace(appTheme) ? null : appTheme.Trim();
+        Dictionary<string, string> inline;
+        if (_appTheme is not null)
+        {
+            Theme = _appTheme;
+            inline = new Dictionary<string, string>(StringComparer.Ordinal);
+        }
+        else
+        {
+            Theme = _ghosttyTheme;
+            inline = new Dictionary<string, string>(_ghosttyInline, StringComparer.Ordinal);
+        }
+
+        Sources.RemoveAll(s => s.StartsWith("theme:", StringComparison.Ordinal));
+        ResolvedTheme = BuildTheme(inline);
+    }
+
+    /// <summary>Takes the theme settings of a freshly loaded config (file watcher).</summary>
+    public void AdoptThemeFrom(AppConfig fresh)
+    {
+        _ghosttyTheme = fresh._ghosttyTheme;
+        _ghosttyInline = fresh._ghosttyInline;
+        SetTheme(fresh._appTheme);
+    }
+
+    /// <summary>
+    /// Writes "theme" into config.json (null = inherit Ghostty's), keeping the
+    /// file's comments and layout. Returns false if the file could not be written.
+    /// </summary>
+    public static bool SaveThemeSetting(string? theme)
+    {
+        try
+        {
+            if (!File.Exists(AppConfigPath))
+            {
+                WriteDefaultAppConfig();
+            }
+
+            string text = File.Exists(AppConfigPath) ? File.ReadAllText(AppConfigPath) : "{\n}\n";
+            string value = theme is null ? "null" : JsonSerializer.Serialize(theme);
+            string updated = Jsonc.SetTopLevelProperty(text, "theme", value);
+            Directory.CreateDirectory(ConfigDir);
+            string tmp = AppConfigPath + ".tmp";
+            File.WriteAllText(tmp, updated);
+            File.Move(tmp, AppConfigPath, overwrite: true);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"could not save theme to config.json: {ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>Stable comparison key for a resolved theme (skip no-op repaints).</summary>
+    public static string Fingerprint(TerminalTheme? theme)
+    {
+        if (theme is null)
+        {
+            return string.Empty;
+        }
+
+        System.Text.StringBuilder sb = new();
+        sb.Append(theme.DefaultForeground).Append(',').Append(theme.DefaultBackground).Append(',')
+            .Append(theme.CursorColor).Append(',').Append(theme.CursorTextColor).Append(',')
+            .Append(theme.SelectionForeground).Append(',').Append(theme.SelectionBackground);
+        for (int i = 0; i < 16; i++)
+        {
+            sb.Append(',').Append(theme.Palette[i]);
+        }
+
+        return sb.ToString();
     }
 
     // ----- Ghostty config layer ---------------------------------------------
@@ -258,9 +360,9 @@ public sealed class AppConfig
             string? file = FindThemeFile(name);
             if (file is not null)
             {
-                foreach ((string key, string value) in ParseGhosttyFile(file))
+                foreach ((string key, string value) in ParseThemeFile(file))
                 {
-                    keys[key == "palette" ? $"palette:{value.Split('=')[0].Trim()}" : key] = value;
+                    keys[key] = value;
                 }
 
                 Sources.Add($"theme:{name}");
@@ -276,6 +378,27 @@ public sealed class AppConfig
             keys[key] = value;
         }
 
+        return ThemeFromKeys(keys);
+    }
+
+    /// <summary>
+    /// Reads a Ghostty theme file into normalized keys ("background",
+    /// "palette:3", ...). Palette entries keep their "N=#hex" value.
+    /// </summary>
+    internal static Dictionary<string, string> ParseThemeFile(string path)
+    {
+        Dictionary<string, string> keys = new(StringComparer.Ordinal);
+        foreach ((string key, string value) in ParseGhosttyFile(path))
+        {
+            keys[key == "palette" ? $"palette:{value.Split('=')[0].Trim()}" : key] = value;
+        }
+
+        return keys;
+    }
+
+    /// <summary>Builds a terminal theme from normalized keys; gaps come from the dark default.</summary>
+    internal static TerminalTheme ThemeFromKeys(Dictionary<string, string> keys)
+    {
         if (keys.Count == 0)
         {
             return TerminalTheme.Dark;
@@ -313,7 +436,7 @@ public sealed class AppConfig
         keys.TryGetValue(key, out string? value) && TryParseColor(value, out uint color) ? color : null;
 
     /// <summary>Parses #rrggbb / rrggbb into 0xAARRGGBB with full alpha.</summary>
-    private static bool TryParseColor(string value, out uint color)
+    internal static bool TryParseColor(string value, out uint color)
     {
         color = 0;
         string hex = value.Trim().TrimStart('#');
@@ -327,25 +450,39 @@ public sealed class AppConfig
         return true;
     }
 
-    private static string? FindThemeFile(string name)
+    /// <summary>Theme folders, searched in this order (first match wins).</summary>
+    internal static string[] ThemeDirs
+    {
+        get
+        {
+            string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            return
+            [
+                Path.Combine(Path.GetDirectoryName(GhosttyConfigPath)!, "themes"),
+                UserThemesDir,
+                "/usr/share/ghostty/themes",
+                "/usr/local/share/ghostty/themes",
+                Path.Combine(home, ".local", "share", "ghostty", "themes"),
+                "/Applications/Ghostty.app/Contents/Resources/ghostty/themes",
+            ];
+        }
+    }
+
+    internal static string GhosttyConfigFile => GhosttyConfigPath;
+
+    internal static string? FindThemeFile(string name)
     {
         if (Path.IsPathRooted(name) && File.Exists(name))
         {
             return name;
         }
 
-        string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        string[] dirs =
-        [
-            Path.Combine(Path.GetDirectoryName(GhosttyConfigPath)!, "themes"),
-            Path.Combine(ConfigDir, "themes"),
-            "/usr/share/ghostty/themes",
-            "/usr/local/share/ghostty/themes",
-            Path.Combine(home, ".local", "share", "ghostty", "themes"),
-            "/Applications/Ghostty.app/Contents/Resources/ghostty/themes",
-        ];
+        if (!ThemeCatalog.IsSafeName(name))
+        {
+            return null;
+        }
 
-        foreach (string dir in dirs)
+        foreach (string dir in ThemeDirs)
         {
             string candidate = Path.Combine(dir, name);
             if (File.Exists(candidate))
