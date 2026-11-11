@@ -7,7 +7,7 @@ Contents/Resources/*.icns). A bare executable started from Finder or a
 terminal shows up as "exec" or not at all. This wraps the binary so it
 behaves like any other Mac app; it runs on Linux CI (no iconutil needed).
 
-usage: make-macos-app.py <publish-dir> <out-dir> <version> [assets-dir]
+usage: make-macos-app.py <publish-dir> <out-dir> <version> [icons-dir]
 """
 import os
 import plistlib
@@ -19,7 +19,7 @@ import sys
 import tempfile
 
 publish, out_dir, version = sys.argv[1], sys.argv[2], sys.argv[3]
-assets = sys.argv[4] if len(sys.argv) > 4 else os.path.join(os.path.dirname(__file__), "..", "assets")
+assets = sys.argv[4] if len(sys.argv) > 4 else os.path.join(os.path.dirname(__file__), "..", "icons")
 
 app = os.path.join(out_dir, "wraithcairn.app")
 contents = os.path.join(app, "Contents")

@@ -6,8 +6,8 @@
     <RootNamespace>Wraithcairn</RootNamespace>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <!-- Windows .exe icon (built from assets/icon-*.png) -->
-    <ApplicationIcon>assets/icon.ico</ApplicationIcon>
+    <!-- Windows .exe icon (icons/icon.ico, transparent corners) -->
+    <ApplicationIcon>icons/icon.ico</ApplicationIcon>
     <Product>wraithcairn</Product>
     <!-- Local builds report 0.0.0-dev; the release workflow passes
          -p:Version / -p:InformationalVersion from GitVersion. -->
@@ -20,8 +20,10 @@
 
   <ItemGroup>
     <!-- Window/taskbar icon loaded at runtime via avares://, plus the sizes
-         DesktopIntegration installs into ~/.local/share/icons on Linux. -->
-    <AvaloniaResource Include="assets/icon-*.png" Link="assets/%(Filename)%(Extension)" />
+         DesktopIntegration installs into ~/.local/share/icons on Linux.
+         icons/ = assets/icon-*.png with transparent rounded corners
+         (scripts/make-transparent-icons.py); assets/ stays as delivered. -->
+    <AvaloniaResource Include="icons/icon-*.png" Link="assets/%(Filename)%(Extension)" />
   </ItemGroup>
 
   <ItemGroup>
