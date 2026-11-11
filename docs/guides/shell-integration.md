@@ -42,3 +42,17 @@ Windows). Set `shell` in `config.json` to force a specific one, e.g.
 If integration can't be set up for a given shell (or fails for any
 reason), the pane still launches — it just runs that shell without the
 extra reporting.
+
+## Pane Environment
+
+Every pane's process gets these variables:
+
+| Variable | Value | Why |
+|---|---|---|
+| `TERM_PROGRAM` | `wraithcairn` | Identifies the terminal. |
+| `TERM_PROGRAM_VERSION` | app version | Lets tools check for features. |
+| `KITTY_WINDOW_ID` | a number, unique per pane session in this process | Tells apps that only check env vars (jcode, ratatui-image based TUIs, yazi, ...) that Kitty graphics work here. Without it they see `TERM=xterm-256color` and fall back to text. |
+
+`KITTY_PID` and `KITTY_LISTEN_ON` are deliberately not set. Tools use those
+to decide they can remote-control kitty itself, which Wraithcairn doesn't
+support.

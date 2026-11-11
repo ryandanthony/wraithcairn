@@ -116,6 +116,12 @@ public sealed class MainWindow : Window
 
     private readonly Dictionary<TerminalControl, PaneInfo> _panes = [];
 
+    /// <summary>
+    /// Per-process counter for KITTY_WINDOW_ID. Shared by all windows, so it
+    /// is unique per pane session (a restarted pane gets a new id, like kitty).
+    /// </summary>
+    private static int s_kittyWindowId;
+
     /// <summary>Pane whose header is being dragged, and the pane under the pointer.</summary>
     private TerminalControl? _dragSource;
     private TerminalControl? _dragTarget;
@@ -1759,6 +1765,15 @@ public sealed class MainWindow : Window
         Dictionary<string, string> environment = new()
         {
             ["TERM_PROGRAM"] = "wraithcairn",
+            ["TERM_PROGRAM_VERSION"] = AppInfo.Version,
+            // libghostty-vt speaks the Kitty graphics protocol, but TERM is
+            // xterm-256color and TERM_PROGRAM is unknown to most apps, so
+            // env-sniffing tools (jcode, ratatui-image, yazi, ...) fall back to
+            // text. KITTY_WINDOW_ID is the de-facto "kitty graphics here"
+            // signal. KITTY_PID is deliberately NOT set: tools use it to
+            // decide they can drive kitty itself (`kitty @`, new windows).
+            ["KITTY_WINDOW_ID"] = Interlocked.Increment(ref s_kittyWindowId)
+                .ToString(System.Globalization.CultureInfo.InvariantCulture),
         };
         if (_shell.Environment is not null)
         {
