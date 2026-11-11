@@ -12,7 +12,10 @@ namespace Wraithcairn;
 /// that terminal's scope, so Plasma files its window under the terminal's
 /// taskbar icon instead of showing its own. Setting _KDE_NET_WM_DESKTOP_FILE
 /// (KWin) and _GTK_APPLICATION_ID (GNOME/mutter) makes the mapping explicit.
-/// Avalonia runs through XWayland on Wayland sessions, so this covers both.
+/// Avalonia runs through XWayland on Wayland sessions by default, so this
+/// covers both. With WRAITHCAIRN_WAYLAND=1 the native Wayland backend sets
+/// xdg_toplevel app_id instead (WaylandPlatformOptions.AppId in Program.cs)
+/// and the window handle is not an XID, so this is skipped.
 /// </summary>
 internal static partial class LinuxWindowIdentity
 {
