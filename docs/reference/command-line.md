@@ -12,6 +12,8 @@ title: Command Line
 | `--dump-panes` | Restores the current layout, prints each pane's startup configuration, working directory, and last screen lines, then exits **without saving**. Useful for inspecting saved state without risking a write. |
 | `--configure-pane` | Opens straight to the **Configure Pane** dialog for the focused/primary pane on launch. |
 | `--version` / `-v` | Prints `wraithcairn <version>` and exits. |
+| `--install-desktop` | Linux: writes `~/.local/share/applications/wraithcairn.desktop` and icons pointing at this binary, so it gets its own task manager entry and appears in the launcher. Normal launches do this automatically. |
+| `--uninstall-desktop` | Linux: removes that desktop entry and its icons. |
 
 ## Examples
 

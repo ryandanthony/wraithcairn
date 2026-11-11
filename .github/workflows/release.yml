@@ -82,13 +82,21 @@ jobs:
         include:
           - rid: linux-x64
             ext: tar.gz
+            os: ubuntu-latest
           - rid: win-x64
             ext: zip
+            os: ubuntu-latest
+          # macOS ships as wraithcairn.app (zip) so the Dock and Cmd+Tab show
+          # it as an app; built on macOS to ad-hoc sign the bundle.
           - rid: osx-arm64
-            ext: tar.gz
+            ext: zip
+            os: macos-latest
+            app: true
           - rid: osx-x64
-            ext: tar.gz
-    runs-on: ubuntu-latest
+            ext: zip
+            os: macos-latest
+            app: true
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
@@ -120,8 +128,22 @@ jobs:
           cd publish
           tar -czf ../wraithcairn-${{ needs.version.outputs.version }}-${{ matrix.rid }}.tar.gz wraithcairn
 
+      - name: Package (macOS .app)
+        if: matrix.app
+        run: |
+          mkdir -p app
+          python3 scripts/make-macos-app.py publish/wraithcairn app ${{ needs.version.outputs.version }}
+          # Ad-hoc sign the whole bundle (the bare exe is linker-signed only);
+          # Apple Silicon refuses to run an unsigned or mismatched bundle.
+          codesign --force --deep --sign - app/wraithcairn.app
+          codesign --verify --deep --strict app/wraithcairn.app
+          app/wraithcairn.app/Contents/MacOS/wraithcairn --version
+          # ditto keeps the bundle's symlinks/permissions/signature intact.
+          ditto -c -k --keepParent app/wraithcairn.app \
+            wraithcairn-${{ needs.version.outputs.version }}-${{ matrix.rid }}.zip
+
       - name: Package (zip)
-        if: matrix.ext == 'zip'
+        if: matrix.ext == 'zip' && !matrix.app
         run: |
           cd publish
           zip -qr ../wraithcairn-${{ needs.version.outputs.version }}-${{ matrix.rid }}.zip wraithcairn

@@ -16,6 +16,25 @@ internal static class Program
             return;
         }
 
+        if (args.Contains("--install-desktop") || args.Contains("--uninstall-desktop"))
+        {
+            // Asset loading needs the Avalonia platform, but no window.
+            BuildAvaloniaApp().SetupWithoutStarting();
+            try
+            {
+                Console.WriteLine(args.Contains("--install-desktop")
+                    ? DesktopIntegration.Install()
+                    : DesktopIntegration.Uninstall());
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"wraithcairn: {ex.Message}");
+                Environment.ExitCode = 1;
+            }
+
+            return;
+        }
+
         BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
     }
 
@@ -58,6 +77,14 @@ public sealed class App : Application
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
+            // Linux task managers group/label windows via a matching .desktop
+            // file; register ours on normal launches (cheap no-op once done).
+            string[] cli = Environment.GetCommandLineArgs();
+            if (!cli.Contains("--selftest") && !cli.Contains("--dump-panes"))
+            {
+                Task.Run(DesktopIntegration.EnsureRegistered);
+            }
+
             // Splash first. The main window (whose restore blocks the UI
             // thread while panes are built) is only created once the splash
             // has actually painted, otherwise it never gets a frame on screen.

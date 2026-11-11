@@ -14,12 +14,14 @@
     <Version>0.0.0</Version>
     <InformationalVersion>0.0.0-dev</InformationalVersion>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <!-- LibraryImport (X11 window hints in LinuxWindowIdentity.cs) -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- Window/taskbar icon loaded at runtime via avares:// -->
-    <AvaloniaResource Include="assets/icon-256.png" Link="assets/icon-256.png" />
-    <AvaloniaResource Include="assets/icon-64.png" Link="assets/icon-64.png" />
+    <!-- Window/taskbar icon loaded at runtime via avares://, plus the sizes
+         DesktopIntegration installs into ~/.local/share/icons on Linux. -->
+    <AvaloniaResource Include="assets/icon-*.png" Link="assets/%(Filename)%(Extension)" />
   </ItemGroup>
 
   <ItemGroup>

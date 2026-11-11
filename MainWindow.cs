@@ -173,6 +173,7 @@ public sealed class MainWindow : Window
         _shell = ShellIntegration.Resolve(Config.Shell);
         Windows.Add(this);
         Activated += (_, _) => _lastFocused = this;
+        Opened += (_, _) => LinuxWindowIdentity.Apply(this);
         Icon = AppInfo.WindowIcon;
         Title = NamedLayouts.ActiveName is { } layoutName
             ? $"wraithcairn [{layoutName}]"
