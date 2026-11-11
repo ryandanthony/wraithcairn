@@ -31,9 +31,11 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Avalonia.Desktop" Version="12.1.3" />
-    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.3" />
-    <PackageReference Include="Avalonia.Fonts.Inter" Version="12.1.3" />
+    <PackageReference Include="Avalonia.Desktop" Version="12.1.6" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.6" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="12.1.6" />
+    <!-- Native Wayland backend, opt-in via WRAITHCAIRN_WAYLAND=1 (Program.cs) -->
+    <PackageReference Include="Avalonia.Wayland" Version="12.1.6" />
 
     <!-- Terminal control, pane layout helpers, services -->
     <PackageReference Include="RoyalApps.RoyalTerminal.Avalonia" Version="0.7.2" />

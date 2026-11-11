@@ -247,9 +247,28 @@ internal static partial class Program
         }
     }
 
-    public static AppBuilder BuildAvaloniaApp() =>
-        AppBuilder.Configure<App>()
-            .UsePlatformDetect()
+    /// <summary>
+    /// WRAITHCAIRN_WAYLAND=1 opts into Avalonia's native Wayland backend
+    /// (experimental in 12.1, so UsePlatformDetect never picks it). Without it,
+    /// Linux runs on X11/XWayland as before.
+    /// </summary>
+    internal static bool WaylandRequested =>
+        Environment.GetEnvironmentVariable("WRAITHCAIRN_WAYLAND") == "1";
+
+    public static AppBuilder BuildAvaloniaApp()
+    {
+        AppBuilder builder = AppBuilder.Configure<App>().UsePlatformDetect();
+        if (WaylandRequested)
+        {
+            // Falls back to the X11 backend picked above when no usable
+            // compositor is reachable (X11 session, ssh -X, etc.).
+            builder = builder.UseWaylandWithFallback();
+        }
+
+        return builder
+            // xdg_toplevel app_id: Plasma/GNOME map it to wraithcairn.desktop,
+            // the Wayland equivalent of LinuxWindowIdentity's X11 hints.
+            .With(new WaylandPlatformOptions { AppId = DesktopIntegration.AppId })
             // Prefer GPU compositing everywhere; software only as last resort.
             .With(new X11PlatformOptions
             {
@@ -272,6 +291,7 @@ internal static partial class Program
             .With(new MacOSPlatformOptions())
             .WithInterFont()
             .LogToTrace();
+    }
 }
 
 public sealed class App : Application

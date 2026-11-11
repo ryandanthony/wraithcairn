@@ -172,6 +172,9 @@ Output is `SELFTEST key=value` lines. CI runs it twice headless (see
 `scripts/selftest-isolated.sh [runs] [restore]`, which points
 `XDG_CONFIG_HOME` at a throwaway copy of your config.
 `WRAITHCAIRN_TRACE=1` prints shell-integration events.
+`WRAITHCAIRN_WAYLAND=1` uses Avalonia's native Wayland backend (experimental
+in Avalonia 12.1) instead of XWayland. It falls back to X11 when no Wayland
+compositor is reachable.
 
 `--dump-panes` restores the layout, prints each pane's startup, cwd and
 last screen lines, and exits without saving.
