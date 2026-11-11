@@ -16,7 +16,9 @@ Grab the latest release for your platform from
 | Platform | Artifact |
 |----------|----------|
 | Linux x64 | `wraithcairn-{version}-linux-x64.tar.gz` |
+| Linux arm64 | `wraithcairn-{version}-linux-arm64.tar.gz` |
 | Windows x64 | `wraithcairn-{version}-win-x64.zip` |
+| Windows arm64 | `wraithcairn-{version}-win-arm64.zip` |
 | macOS Apple Silicon | `wraithcairn-{version}-osx-arm64.zip` (contains `wraithcairn.app`) |
 | macOS Intel | `wraithcairn-{version}-osx-x64.zip` (contains `wraithcairn.app`) |
 

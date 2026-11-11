@@ -83,7 +83,15 @@ jobs:
           - rid: linux-x64
             ext: tar.gz
             os: ubuntu-latest
+          # Native arm64 runner so the binary can be smoke-tested in place.
+          - rid: linux-arm64
+            ext: tar.gz
+            os: ubuntu-24.04-arm
+            smoke: true
           - rid: win-x64
+            ext: zip
+            os: ubuntu-latest
+          - rid: win-arm64
             ext: zip
             os: ubuntu-latest
           # macOS ships as wraithcairn.app (zip) so the Dock and Cmd+Tab show
@@ -121,6 +129,12 @@ jobs:
           # SkiaSharp/HarfBuzz ship native .pdb files on Windows; drop them.
           rm -f publish/wraithcairn/*.pdb
           ls -la publish/wraithcairn
+
+      - name: Smoke test ${{ matrix.rid }}
+        if: matrix.smoke
+        run: |
+          file publish/wraithcairn/wraithcairn
+          publish/wraithcairn/wraithcairn --version
 
       - name: Package (tar.gz)
         if: matrix.ext == 'tar.gz'
@@ -184,7 +198,9 @@ jobs:
             | Platform | File |
             |---|---|
             | Linux x64 | `wraithcairn-${{ needs.version.outputs.version }}-linux-x64.tar.gz` |
+            | Linux arm64 | `wraithcairn-${{ needs.version.outputs.version }}-linux-arm64.tar.gz` |
             | Windows x64 | `wraithcairn-${{ needs.version.outputs.version }}-win-x64.zip` |
+            | Windows arm64 | `wraithcairn-${{ needs.version.outputs.version }}-win-arm64.zip` |
             | macOS Apple Silicon | `wraithcairn-${{ needs.version.outputs.version }}-osx-arm64.zip` (`wraithcairn.app`) |
             | macOS Intel | `wraithcairn-${{ needs.version.outputs.version }}-osx-x64.zip` (`wraithcairn.app`) |
 

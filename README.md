@@ -141,10 +141,10 @@ last screen lines, and exits without saving.
 ## Publishing
 
 `.github/workflows/release.yml` publishes on every push to `main` for
-linux-x64, win-x64, osx-arm64 and osx-x64. Each build is one
-self-contained executable. Native libraries (libghostty-vt, Skia,
-HarfBuzz) are bundled and self-extract on first run to the .NET bundle
-cache (`~/.net/wraithcairn/`, or `$DOTNET_BUNDLE_EXTRACT_BASE_DIR`).
+linux-x64, linux-arm64, win-x64, win-arm64, osx-arm64 and osx-x64. Each
+build is one self-contained executable. Native libraries (libghostty-vt,
+Skia, HarfBuzz) are bundled and self-extract on first run to the .NET
+bundle cache (`~/.net/wraithcairn/`, or `$DOTNET_BUNDLE_EXTRACT_BASE_DIR`).
 
 The SDK normally leaves `libSystem.Native` out of single-file bundles
 because the host links it statically, but RoyalTerminal's Unix PTY code
