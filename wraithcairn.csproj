@@ -24,6 +24,10 @@
          icons/ = assets/icon-*.png with transparent rounded corners
          (scripts/make-transparent-icons.py); assets/ stays as delivered. -->
     <AvaloniaResource Include="icons/icon-*.png" Link="assets/%(Filename)%(Extension)" />
+    <!-- Same PNGs as plain manifest resources, so the install-desktop flag can
+         write them without starting Avalonia (no display needed, e.g. from
+         the install script over SSH). -->
+    <EmbeddedResource Include="icons/icon-*.png" LogicalName="icons/%(Filename)%(Extension)" />
   </ItemGroup>
 
   <ItemGroup>

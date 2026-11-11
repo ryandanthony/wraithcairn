@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using Avalonia.Platform;
 
 namespace Wraithcairn;
 
@@ -92,7 +91,13 @@ public static class DesktopIntegration
         {
             try
             {
-                using Stream source = AssetLoader.Open(new Uri($"avares://wraithcairn/assets/icon-{size}.png"));
+                // Manifest resource, not avares://: works without a display.
+                using Stream? source = typeof(DesktopIntegration).Assembly.GetManifestResourceStream($"icons/icon-{size}.png");
+                if (source is null)
+                {
+                    continue;
+                }
+
                 string dir = Path.Combine(DataHome, "icons", "hicolor", $"{size}x{size}", "apps");
                 Directory.CreateDirectory(dir);
                 using FileStream target = File.Create(Path.Combine(dir, $"{AppId}.png"));

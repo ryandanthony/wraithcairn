@@ -18,8 +18,8 @@ internal static class Program
 
         if (args.Contains("--install-desktop") || args.Contains("--uninstall-desktop"))
         {
-            // Asset loading needs the Avalonia platform, but no window.
-            BuildAvaloniaApp().SetupWithoutStarting();
+            // No Avalonia here: icons come from manifest resources, so this
+            // works headless (install script over SSH, CI, no $DISPLAY).
             try
             {
                 Console.WriteLine(args.Contains("--install-desktop")
