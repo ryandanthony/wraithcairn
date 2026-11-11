@@ -1154,6 +1154,46 @@ public sealed class MainWindow : Window
                 File.Delete(odOut);
                 Console.WriteLine($"SELFTEST mac_ctrl_letters={got.StartsWith(expected, StringComparison.Ordinal)} got={got}");
 
+                // Shift+1..0 as Avalonia/X11 delivers them (no key text), with
+                // the Kitty keyboard protocol on like jcode/neovim/fish 4 use:
+                // the program must get "!@#$%^&*()", not ESC[51;2u for "#".
+                if (XkbKeyboardLayout.Instance is not null)
+                {
+                    string shiftOut = Path.Combine(Path.GetTempPath(), $"wraithcairn-shift-{Environment.ProcessId}.txt");
+                    intPane.SendInput($"stty raw -echo; printf '\\033[>1u'; head -c 10 | od -An -tx1 > {shiftOut}; printf '\\033[<u'; stty sane\n");
+                    await Task.Delay(800);
+                    Key[] digits = [Key.D1, Key.D2, Key.D3, Key.D4, Key.D5, Key.D6, Key.D7, Key.D8, Key.D9, Key.D0];
+                    PhysicalKey[] physical =
+                    [
+                        PhysicalKey.Digit1, PhysicalKey.Digit2, PhysicalKey.Digit3, PhysicalKey.Digit4, PhysicalKey.Digit5,
+                        PhysicalKey.Digit6, PhysicalKey.Digit7, PhysicalKey.Digit8, PhysicalKey.Digit9, PhysicalKey.Digit0,
+                    ];
+                    for (int i = 0; i < digits.Length; i++)
+                    {
+                        intPane.RaiseEvent(new KeyEventArgs
+                        {
+                            RoutedEvent = KeyDownEvent,
+                            Key = digits[i],
+                            PhysicalKey = physical[i],
+                            KeyModifiers = KeyModifiers.Shift,
+                            Source = intPane,
+                        });
+                        await Task.Delay(30);
+                    }
+
+                    await Task.Delay(800);
+                    string shiftGot = File.Exists(shiftOut)
+                        ? string.Join(" ", File.ReadAllText(shiftOut).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))
+                        : "(none)";
+                    File.Delete(shiftOut);
+                    const string shiftExpected = "21 40 23 24 25 5e 26 2a 28 29"; // !@#$%^&*()
+                    Console.WriteLine($"SELFTEST shift_digits_kitty={shiftGot == shiftExpected} got={shiftGot}");
+                }
+                else
+                {
+                    Console.WriteLine("SELFTEST shift_digits_kitty=skipped (no X11/XKB)");
+                }
+
                 // Ctrl+Shift+C copies the selection; plain Ctrl+V is not paste.
                 Avalonia.Input.Platform.IClipboard? clipboard = Clipboard;
                 if (clipboard is not null)
@@ -1666,6 +1706,9 @@ public sealed class MainWindow : Window
         // Mac/Windows Ctrl+letter: drop the C0 key text before the terminal sees it.
         StripControlKeySymbol(e);
 
+        // Linux: Shift+1..0 etc. arrive without key text; fill it from XKB.
+        XkbKeyboardLayout.FillKeySymbol(e);
+
         bool ctrlShift = e.KeyModifiers.HasFlag(KeyModifiers.Control)
             && e.KeyModifiers.HasFlag(KeyModifiers.Shift);
         bool ctrl = e.KeyModifiers.HasFlag(KeyModifiers.Control);
@@ -1757,7 +1800,7 @@ public sealed class MainWindow : Window
     {
         TerminalControl terminal = new(
             new TerminalSessionService(),
-            new DefaultTerminalInputAdapter(),
+            XkbKeyboardLayout.Instance is { } xkb ? new DefaultTerminalInputAdapter(xkb) : new DefaultTerminalInputAdapter(),
             new DefaultTerminalSelectionService(),
             new DefaultTerminalScrollService(),
             new DefaultVtProcessorFactory([new GhosttyVtProcessorProvider()]),

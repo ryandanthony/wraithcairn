@@ -44,6 +44,7 @@ jobs:
           echo "$OUTPUT" | grep -q "SELFTEST ctrl_c_interrupts=True was_running=True with_selection=True"
           echo "$OUTPUT" | grep -q "SELFTEST mac_ctrl_c_interrupts=True"
           echo "$OUTPUT" | grep -q "SELFTEST mac_ctrl_letters=True"
+          echo "$OUTPUT" | grep -q "SELFTEST shift_digits_kitty=True"
           echo "$OUTPUT" | grep -q "SELFTEST context_menu_clipboard=True plain_ctrl_keys_free=True"
           echo "$OUTPUT" | grep -q "SELFTEST menu_split_left=True"
           echo "$OUTPUT" | grep -q "SELFTEST menu_split_up=True"
