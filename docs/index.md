@@ -50,7 +50,7 @@ Ghostty setup carries over without any extra configuration.
 
 ## Next steps
 
-- [Installation](/docs/getting-started/installation) — download a release or build from source
+- [Installation](/docs/getting-started/installation) — one-line install script, a release download, or build from source
 - [Quick Start](/docs/getting-started/quick-start) — first launch, your first split, your first saved layout
 - [Layouts](/docs/guides/layouts) — switching, creating, saving, and reopening layouts
 - [Keyboard Shortcuts](/docs/reference/keyboard-shortcuts) — the full shortcut table

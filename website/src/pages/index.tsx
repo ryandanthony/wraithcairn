@@ -1,4 +1,5 @@
 import type {ReactNode} from 'react';
+import {useEffect, useState} from 'react';
 import clsx from 'clsx';
 import Link from '@docusaurus/Link';
 import useDocusaurusContext from '@docusaurus/useDocusaurusContext';
@@ -74,6 +75,66 @@ function Feature({title, description, link}: FeatureItem) {
   );
 }
 
+const INSTALL = {
+  unix: {
+    label: 'Linux / macOS',
+    command: 'curl -fsSL https://ryandanthony.github.io/wraithcairn/install | bash',
+  },
+  windows: {
+    label: 'Windows',
+    command: 'irm https://ryandanthony.github.io/wraithcairn/install.ps1 | iex',
+  },
+} as const;
+
+type InstallOs = keyof typeof INSTALL;
+
+function InstallCommand() {
+  const [os, setOs] = useState<InstallOs>('unix');
+  const [copied, setCopied] = useState(false);
+
+  // Default to the visitor's OS after hydration (the static HTML shows Unix).
+  useEffect(() => {
+    if (/Win/i.test(navigator.userAgent)) {
+      setOs('windows');
+    }
+  }, []);
+
+  const command = INSTALL[os].command;
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(command);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // clipboard blocked (http, permissions); the text is still selectable
+    }
+  };
+
+  return (
+    <div className={styles.install}>
+      <div className={styles.installTabs} role="tablist" aria-label="Install command">
+        {(Object.keys(INSTALL) as InstallOs[]).map((key) => (
+          <button
+            key={key}
+            type="button"
+            role="tab"
+            aria-selected={os === key}
+            className={clsx(styles.installTab, os === key && styles.installTabActive)}
+            onClick={() => setOs(key)}>
+            {INSTALL[key].label}
+          </button>
+        ))}
+      </div>
+      <div className={styles.installBox}>
+        <code className={styles.installCode}>{command}</code>
+        <button type="button" className={styles.copyButton} onClick={copy} aria-label="Copy install command">
+          {copied ? 'Copied' : 'Copy'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function HomepageHeader() {
   const {siteConfig} = useDocusaurusContext();
   const logoSrc = useBaseUrl('img/icon.svg');
@@ -88,6 +149,7 @@ function HomepageHeader() {
           {siteConfig.title}
         </Heading>
         <p className="hero__subtitle">{siteConfig.tagline}</p>
+        <InstallCommand />
         <div className={styles.buttons}>
           <Link
             className="button button--secondary button--lg"

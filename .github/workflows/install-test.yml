@@ -1,0 +1,182 @@
+# Runs the one-line installers (website/static/install, install.ps1) on all
+# six release platforms against the latest published release: install,
+# --version, reinstall, a pinned older version, then uninstall.
+#
+# Runs when an installer changes, after every Release (so a new release that
+# breaks the installer shows up right away), and on demand.
+name: Install scripts
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "website/static/install"
+      - "website/static/install.ps1"
+      - ".github/workflows/install-test.yml"
+  pull_request:
+    paths:
+      - "website/static/install"
+      - "website/static/install.ps1"
+      - ".github/workflows/install-test.yml"
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: shellcheck
+        run: shellcheck website/static/install
+      - name: PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          $r = Invoke-ScriptAnalyzer website/static/install.ps1 -Severity Warning,Error -ExcludeRule PSAvoidUsingWriteHost
+          $r | Format-Table -AutoSize | Out-String -Width 200
+          if ($r) { throw "PSScriptAnalyzer found $($r.Count) issue(s)" }
+
+  unix:
+    needs: lint
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, rid: linux-x64 }
+          - { os: ubuntu-24.04-arm, rid: linux-arm64 }
+          - { os: macos-latest, rid: osx-arm64 }
+          - { os: macos-15-intel, rid: osx-x64 }
+    name: install (${{ matrix.rid }})
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Install (piped, as from curl)
+        run: |
+          set -euo pipefail
+          out=$(bash < website/static/install 2>&1) || { echo "$out"; exit 1; }
+          echo "$out"
+          echo "$out" | grep -q "(${{ matrix.rid }})"
+
+      - name: Check install
+        run: |
+          set -euo pipefail
+          "$HOME/.local/bin/wraithcairn" --version | tee version.txt
+          grep -Eq '^wraithcairn [0-9]+\.[0-9]+\.[0-9]+' version.txt
+          if [ "$RUNNER_OS" = Linux ]; then
+            test -f "$HOME/.local/share/applications/wraithcairn.desktop"
+            grep -q "Exec=\"$HOME/.local/bin/wraithcairn\"" "$HOME/.local/share/applications/wraithcairn.desktop"
+            test -f "$HOME/.local/share/icons/hicolor/256x256/apps/wraithcairn.png"
+          else
+            app=/Applications/wraithcairn.app
+            [ -d "$app" ] || app="$HOME/Applications/wraithcairn.app"
+            test -x "$app/Contents/MacOS/wraithcairn"
+            codesign --verify --deep --strict "$app"
+            if xattr -p com.apple.quarantine "$app" 2>/dev/null; then echo "quarantine flag left on"; exit 1; fi
+          fi
+
+      - name: Reinstall, then pin the previous release
+        run: |
+          set -euo pipefail
+          bash < website/static/install | tee re.txt
+          grep -q "already installed; reinstalling" re.txt
+          latest=$(awk '{print $2}' version.txt)
+          # Previous patch tag, if it exists (first release has none).
+          IFS=. read -r ma mi pa <<<"$latest"
+          if [ "$pa" -gt 0 ]; then
+            bash -s -- --version "v$ma.$mi.$((pa - 1))" < website/static/install
+            "$HOME/.local/bin/wraithcairn" --version | grep -q "^wraithcairn $ma.$mi.$((pa - 1))"
+          fi
+
+      - name: Bad version fails cleanly
+        run: |
+          if bash -s -- --version v0.0.0-nope < website/static/install; then
+            echo "expected failure"; exit 1
+          fi
+
+      - name: Uninstall
+        run: |
+          set -euo pipefail
+          bash -s -- --uninstall < website/static/install
+          test ! -e "$HOME/.local/bin/wraithcairn"
+          if [ "$RUNNER_OS" = Linux ]; then
+            test ! -e "$HOME/.local/share/applications/wraithcairn.desktop"
+          else
+            test ! -e /Applications/wraithcairn.app
+            test ! -e "$HOME/Applications/wraithcairn.app"
+          fi
+
+  windows:
+    needs: lint
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, rid: win-x64 }
+          - { os: windows-11-arm, rid: win-arm64 }
+    name: install (${{ matrix.rid }})
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Install (irm | iex style)
+        run: |
+          $out = Get-Content -Raw website/static/install.ps1 | Invoke-Expression *>&1 | Out-String
+          $out
+          if ($out -notmatch [regex]::Escape('(${{ matrix.rid }})')) { throw 'wrong build picked' }
+
+      - name: Check install
+        run: |
+          $dir = Join-Path $env:LOCALAPPDATA 'Programs\wraithcairn'
+          $exe = Join-Path $dir 'wraithcairn.exe'
+          $v = & $exe --version | Select-Object -First 1
+          $v
+          if ($v -notmatch '^wraithcairn \d+\.\d+\.\d+') { throw "bad --version: $v" }
+          $lnk = Join-Path ([Environment]::GetFolderPath('Programs')) 'wraithcairn.lnk'
+          if (-not (Test-Path $lnk)) { throw 'no Start menu shortcut' }
+          $target = (New-Object -ComObject WScript.Shell).CreateShortcut($lnk).TargetPath
+          if ($target -ne $exe) { throw "shortcut points at $target" }
+          $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+          if (($userPath -split ';') -notcontains $dir) { throw 'install dir not on user PATH' }
+          # Windows PowerShell 5.1 must work too (the default on Windows).
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Get-Content -Raw website/static/install.ps1 | Invoke-Expression"
+          if ($LASTEXITCODE) { throw "Windows PowerShell 5.1 install failed ($LASTEXITCODE)" }
+
+      - name: Pinned version via scriptblock parameters
+        run: |
+          $exe = Join-Path $env:LOCALAPPDATA 'Programs\wraithcairn\wraithcairn.exe'
+          $latest = ((& $exe --version | Select-Object -First 1) -split ' ')[1]
+          $ma, $mi, $pa = $latest -split '\.'
+          if ([int]$pa -gt 0) {
+            $pin = "v$ma.$mi.$([int]$pa - 1)"
+            & ([scriptblock]::Create((Get-Content -Raw website/static/install.ps1))) -Version $pin
+            $v = & $exe --version | Select-Object -First 1
+            if ($v -ne "wraithcairn $($pin.TrimStart('v'))") { throw "pin failed: $v" }
+          }
+
+      - name: Bad version fails cleanly
+        run: |
+          $failed = $false
+          try { & ([scriptblock]::Create((Get-Content -Raw website/static/install.ps1))) -Version v0.0.0-nope } catch { $failed = $true; "threw: $_" }
+          if (-not $failed) { throw 'expected failure' }
+
+      - name: Uninstall
+        run: |
+          & ([scriptblock]::Create((Get-Content -Raw website/static/install.ps1))) -Uninstall
+          $dir = Join-Path $env:LOCALAPPDATA 'Programs\wraithcairn'
+          if (Test-Path (Join-Path $dir 'wraithcairn.exe')) { throw 'exe still there' }
+          if (Test-Path (Join-Path ([Environment]::GetFolderPath('Programs')) 'wraithcairn.lnk')) { throw 'shortcut still there' }
+          $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+          if (($userPath -split ';') -contains $dir) { throw 'still on user PATH' }

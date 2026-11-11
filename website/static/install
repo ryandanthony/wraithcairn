@@ -1,0 +1,358 @@
+#!/usr/bin/env bash
+# wraithcairn installer for Linux and macOS (and Git Bash on Windows).
+#
+#   curl -fsSL https://ryandanthony.github.io/wraithcairn/install | bash
+#
+# Options (after `bash -s --`), or the matching environment variables:
+#   --version vX.Y.Z   install a specific release   WRAITHCAIRN_VERSION
+#   --dir DIR          where the command goes       WRAITHCAIRN_INSTALL_DIR
+#                      (default ~/.local/bin)
+#   --app-dir DIR      macOS: where wraithcairn.app WRAITHCAIRN_APP_DIR
+#                      goes (default /Applications, else ~/Applications)
+#   --no-desktop       Linux: skip the launcher     WRAITHCAIRN_NO_DESKTOP=1
+#                      entry and icons
+#   --uninstall        remove what this script installed
+#
+# Downloads the self-contained release for this OS and CPU from GitHub
+# Releases, verifies it against the release's SHA256SUMS, and installs it.
+# Nothing outside your home directory is touched (except /Applications on
+# macOS when it is writable). Source:
+# https://github.com/ryandanthony/wraithcairn/blob/main/website/static/install
+
+# Everything lives in main(), called on the last line, so a truncated
+# download can never run half a script.
+set -euo pipefail
+
+REPO="ryandanthony/wraithcairn"
+DOCS="https://ryandanthony.github.io/wraithcairn"
+
+if [ -t 2 ] && [ -z "${NO_COLOR:-}" ]; then
+  B=$'\033[1;34m' G=$'\033[1;32m' Y=$'\033[1;33m' R=$'\033[1;31m' N=$'\033[0m'
+else
+  B='' G='' Y='' R='' N=''
+fi
+info() { printf '%s==>%s %s\n' "$B" "$N" "$*"; }
+ok()   { printf '%s==>%s %s\n' "$G" "$N" "$*"; }
+warn() { printf '%swarning:%s %s\n' "$Y" "$N" "$*" >&2; }
+err()  { printf '%serror:%s %s\n' "$R" "$N" "$*" >&2; exit 1; }
+
+usage() {
+  cat <<EOF
+wraithcairn installer
+
+  curl -fsSL $DOCS/install | bash
+  curl -fsSL $DOCS/install | bash -s -- [options]
+
+  --version vX.Y.Z   install a specific release (default: latest)
+  --dir DIR          where the wraithcairn command goes (default ~/.local/bin)
+  --app-dir DIR      macOS: where wraithcairn.app goes
+                     (default /Applications if writable, else ~/Applications)
+  --no-desktop       Linux: skip the application launcher entry and icons
+  --uninstall        remove what this script installed
+
+Environment: WRAITHCAIRN_VERSION, WRAITHCAIRN_INSTALL_DIR,
+WRAITHCAIRN_APP_DIR, WRAITHCAIRN_NO_DESKTOP=1.
+Docs: $DOCS/docs/getting-started/installation
+EOF
+}
+
+fetch() { # url dest
+  curl -fsSL --retry 3 --connect-timeout 15 "$1" -o "$2"
+}
+
+sha256_of() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print tolower($1)}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print tolower($1)}'
+  elif command -v openssl >/dev/null 2>&1; then
+    openssl dgst -sha256 "$1" | awk '{print tolower($NF)}'
+  else
+    err "need sha256sum, shasum or openssl to verify the download"
+  fi
+}
+
+on_path() {
+  case ":$PATH:" in *":$1:"*) return 0 ;; esac
+  return 1
+}
+
+detect_platform() {
+  local os arch
+  os="$(uname -s)"
+  arch="$(uname -m)"
+  case "$os" in
+    Linux)
+      PLATFORM=linux
+      EXT=tar.gz
+      if ldd --version 2>&1 | grep -qi musl; then
+        err "musl libc (e.g. Alpine) is not supported yet; the builds need glibc"
+      fi
+      case "$arch" in
+        x86_64|amd64) RID=linux-x64 ;;
+        aarch64|arm64) RID=linux-arm64 ;;
+        *) err "unsupported Linux CPU: $arch (x86_64 and arm64 are available)" ;;
+      esac
+      ;;
+    Darwin)
+      PLATFORM=macos
+      EXT=zip
+      # Under Rosetta uname reports x86_64; prefer the native arm64 build.
+      if [ "$arch" = arm64 ] || [ "$(sysctl -in hw.optional.arm64 2>/dev/null)" = 1 ]; then
+        RID=osx-arm64
+      else
+        RID=osx-x64
+      fi
+      ;;
+    MINGW*|MSYS*|CYGWIN*)
+      PLATFORM=windows
+      EXT=zip
+      # Git Bash can be an emulated x64 process on Windows arm64.
+      case "${PROCESSOR_ARCHITEW6432:-${PROCESSOR_ARCHITECTURE:-$arch}}" in
+        ARM64|arm64|aarch64) RID=win-arm64 ;;
+        AMD64|x86_64|X64) RID=win-x64 ;;
+        *) err "unsupported Windows CPU: $arch" ;;
+      esac
+      ;;
+    *)
+      err "unsupported OS: $os. Build from source: https://github.com/$REPO"
+      ;;
+  esac
+}
+
+# Fills ASSET, EXPECTED and VERSION from the release's SHA256SUMS. Using
+# releases/latest/download avoids the rate-limited GitHub API, and the asset
+# name carries the version, so no redirect parsing is needed.
+resolve_release() {
+  local sums_url line
+  if [ -n "$TAG" ]; then
+    case "$TAG" in v*) ;; *) TAG="v$TAG" ;; esac
+    sums_url="https://github.com/$REPO/releases/download/$TAG/SHA256SUMS"
+  else
+    sums_url="https://github.com/$REPO/releases/latest/download/SHA256SUMS"
+  fi
+  fetch "$sums_url" "$TMP/SHA256SUMS" \
+    || err "could not download $sums_url${TAG:+ (does release $TAG exist?)}"
+
+  line="$(grep -E "[ *]wraithcairn-[0-9][^ ]*-${RID}\.${EXT}\$" "$TMP/SHA256SUMS" | head -1 || true)"
+  [ -n "$line" ] || err "release ${TAG:-latest} has no $RID build"
+  EXPECTED="$(printf '%s' "$line" | awk '{print tolower($1)}')"
+  ASSET="$(printf '%s' "$line" | awk '{print $2}' | sed 's/^\*//')"
+  VERSION="${ASSET#wraithcairn-}"
+  VERSION="${VERSION%-"$RID".*}"
+  printf '%s' "$EXPECTED" | grep -Eq '^[0-9a-f]{64}$' || err "bad checksum line for $ASSET"
+}
+
+download_verified() {
+  local url="https://github.com/$REPO/releases/download/v$VERSION/$ASSET" actual
+  info "Downloading $ASSET"
+  fetch "$url" "$TMP/$ASSET" || err "download failed: $url"
+  actual="$(sha256_of "$TMP/$ASSET")"
+  [ "$actual" = "$EXPECTED" ] || err "SHA-256 mismatch for $ASSET (expected $EXPECTED, got $actual)"
+  info "Verified SHA-256"
+}
+
+existing_version() {
+  [ -x "$1" ] || return 0
+  "$1" --version 2>/dev/null | awk 'NR==1 {print $2}' || true
+}
+
+# Atomic replace: a running wraithcairn keeps its old inode.
+install_binary() { # src dest
+  mkdir -p "$(dirname "$2")"
+  cp -f "$1" "$2.new.$$"
+  chmod 755 "$2.new.$$"
+  mv -f "$2.new.$$" "$2"
+}
+
+pick_app_dir() {
+  if [ -n "$APP_DIR" ]; then
+    printf '%s' "$APP_DIR"
+  elif [ -w /Applications ]; then
+    printf '/Applications'
+  else
+    printf '%s/Applications' "$HOME"
+  fi
+}
+
+install_linux() {
+  local bin="$INSTALL_DIR/wraithcairn"
+  tar -xzf "$TMP/$ASSET" -C "$TMP"
+  [ -f "$TMP/wraithcairn/wraithcairn" ] || err "archive did not contain wraithcairn/wraithcairn"
+  install_binary "$TMP/wraithcairn/wraithcairn" "$bin"
+  INSTALLED="$bin"
+
+  if [ "$NO_DESKTOP" != 1 ]; then
+    # Launcher entry + icons in ~/.local/share, so it gets its own taskbar
+    # entry. Older releases need a display for this; never fatal.
+    if "$bin" --install-desktop >/dev/null 2>&1; then
+      info "Added the application launcher entry"
+    else
+      warn "could not add the launcher entry; run 'wraithcairn --install-desktop' from your desktop session"
+    fi
+  fi
+}
+
+install_macos() {
+  local apps app old
+  apps="$(pick_app_dir)"
+  app="$apps/wraithcairn.app"
+  mkdir -p "$apps" "$TMP/unpacked"
+  # ditto keeps the bundle's symlinks, permissions and signature.
+  ditto -x -k "$TMP/$ASSET" "$TMP/unpacked"
+  [ -d "$TMP/unpacked/wraithcairn.app" ] || err "archive did not contain wraithcairn.app"
+  xattr -dr com.apple.quarantine "$TMP/unpacked/wraithcairn.app" 2>/dev/null || true
+
+  if [ -e "$app" ]; then
+    old="$TMP/old.app"
+    mv "$app" "$old"
+  fi
+  mv "$TMP/unpacked/wraithcairn.app" "$app"
+  APP="$app"
+
+  # A tiny launcher on PATH. A wrapper (not a symlink) so the binary always
+  # runs from inside the bundle.
+  mkdir -p "$INSTALL_DIR"
+  cat > "$INSTALL_DIR/wraithcairn.new.$$" <<EOF
+#!/bin/sh
+# Installed by $DOCS/install
+exec "$app/Contents/MacOS/wraithcairn" "\$@"
+EOF
+  chmod 755 "$INSTALL_DIR/wraithcairn.new.$$"
+  mv -f "$INSTALL_DIR/wraithcairn.new.$$" "$INSTALL_DIR/wraithcairn"
+  INSTALLED="$INSTALL_DIR/wraithcairn"
+}
+
+install_windows() {
+  local dest unzip_dir
+  dest="$(cygpath -u "${LOCALAPPDATA:?LOCALAPPDATA is not set}")/Programs/wraithcairn"
+  [ "$INSTALL_DIR_SET" = 1 ] && dest="$INSTALL_DIR"
+  unzip_dir="$TMP/unpacked"
+  mkdir -p "$unzip_dir" "$dest"
+  if command -v unzip >/dev/null 2>&1; then
+    unzip -q "$TMP/$ASSET" -d "$unzip_dir"
+  else
+    powershell.exe -NoProfile -Command "Expand-Archive -Force '$(cygpath -w "$TMP/$ASSET")' '$(cygpath -w "$unzip_dir")'"
+  fi
+  [ -f "$unzip_dir/wraithcairn/wraithcairn.exe" ] || err "archive did not contain wraithcairn/wraithcairn.exe"
+  # A running exe can be renamed but not overwritten.
+  rm -f "$dest/wraithcairn.exe.old" 2>/dev/null || true
+  [ -e "$dest/wraithcairn.exe" ] && mv -f "$dest/wraithcairn.exe" "$dest/wraithcairn.exe.old"
+  cp -f "$unzip_dir/wraithcairn/wraithcairn.exe" "$dest/wraithcairn.exe"
+  INSTALL_DIR="$dest"
+  INSTALLED="$dest/wraithcairn.exe"
+  warn "for a Start menu entry and PATH setup, use the PowerShell installer:"
+  warn "  irm $DOCS/install.ps1 | iex"
+}
+
+uninstall() {
+  local bin="$INSTALL_DIR/wraithcairn" removed=0 app
+  case "$PLATFORM" in
+    linux)
+      if [ -x "$bin" ]; then
+        "$bin" --uninstall-desktop >/dev/null 2>&1 || true
+      fi
+      ;;
+    macos)
+      app="$(pick_app_dir)/wraithcairn.app"
+      if [ -d "$app" ]; then rm -rf "$app"; ok "Removed $app"; removed=1; fi
+      ;;
+    windows)
+      [ "$INSTALL_DIR_SET" = 1 ] || INSTALL_DIR="$(cygpath -u "$LOCALAPPDATA")/Programs/wraithcairn"
+      bin="$INSTALL_DIR/wraithcairn.exe"
+      ;;
+  esac
+  if [ -e "$bin" ]; then rm -f "$bin" "$bin.old"; ok "Removed $bin"; removed=1; fi
+  [ "$removed" = 1 ] || info "Nothing to remove; wraithcairn is not installed in $INSTALL_DIR"
+  echo "Your settings in ~/.config/wraithcairn were left alone."
+}
+
+main() {
+  TAG="${WRAITHCAIRN_VERSION:-}"
+  INSTALL_DIR="${WRAITHCAIRN_INSTALL_DIR:-}"
+  APP_DIR="${WRAITHCAIRN_APP_DIR:-}"
+  NO_DESKTOP="${WRAITHCAIRN_NO_DESKTOP:-0}"
+  UNINSTALL=0
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --version) TAG="${2:?--version needs a value}"; shift ;;
+      --version=*) TAG="${1#*=}" ;;
+      --dir) INSTALL_DIR="${2:?--dir needs a value}"; shift ;;
+      --dir=*) INSTALL_DIR="${1#*=}" ;;
+      --app-dir) APP_DIR="${2:?--app-dir needs a value}"; shift ;;
+      --app-dir=*) APP_DIR="${1#*=}" ;;
+      --no-desktop) NO_DESKTOP=1 ;;
+      --uninstall) UNINSTALL=1 ;;
+      -h|--help) usage; exit 0 ;;
+      *) err "unknown option: $1 (try --help)" ;;
+    esac
+    shift
+  done
+
+  INSTALL_DIR_SET=0
+  [ -n "$INSTALL_DIR" ] && INSTALL_DIR_SET=1
+  INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
+
+  detect_platform
+
+  if [ "$UNINSTALL" = 1 ]; then
+    uninstall
+    return
+  fi
+
+  command -v curl >/dev/null 2>&1 || err "curl is required"
+  TMP="$(mktemp -d "${TMPDIR:-/tmp}/wraithcairn-install.XXXXXX")"
+  trap 'rm -rf "$TMP"' EXIT
+
+  resolve_release
+
+  local before=""
+  [ "$PLATFORM" = linux ] && before="$(existing_version "$INSTALL_DIR/wraithcairn")"
+  [ "$PLATFORM" = macos ] && before="$(existing_version "$(pick_app_dir)/wraithcairn.app/Contents/MacOS/wraithcairn")"
+  if [ -z "$before" ]; then
+    info "Installing wraithcairn $VERSION ($RID)"
+  elif [ "$before" = "$VERSION" ]; then
+    info "wraithcairn $VERSION is already installed; reinstalling"
+  else
+    info "Updating wraithcairn $before -> $VERSION ($RID)"
+  fi
+
+  download_verified
+
+  INSTALLED=""
+  APP=""
+  case "$PLATFORM" in
+    linux) install_linux ;;
+    macos) install_macos ;;
+    windows) install_windows ;;
+  esac
+
+  local got
+  got="$("$INSTALLED" --version 2>/dev/null | head -1 || true)"
+  [ -n "$got" ] || [ "$PLATFORM" = windows ] || err "installed binary did not run: $INSTALLED --version"
+
+  echo
+  ok "Installed ${got:-wraithcairn $VERSION}"
+  [ -n "$APP" ] && echo "    app:     $APP"
+  echo "    command: $INSTALLED"
+
+  if ! on_path "$INSTALL_DIR"; then
+    echo
+    warn "$INSTALL_DIR is not on your PATH. Add it with:"
+    case "${SHELL##*/}" in
+      zsh)  echo "    echo 'export PATH=\"$INSTALL_DIR:\$PATH\"' >> ~/.zshrc && exec zsh" ;;
+      fish) echo "    fish_add_path $INSTALL_DIR" ;;
+      *)    echo "    echo 'export PATH=\"$INSTALL_DIR:\$PATH\"' >> ~/.bashrc && exec bash" ;;
+    esac
+  fi
+
+  echo
+  case "$PLATFORM" in
+    macos) echo "Open wraithcairn from Launchpad / Applications, or run: wraithcairn" ;;
+    *)     echo "Run: wraithcairn" ;;
+  esac
+  echo "Docs: $DOCS"
+}
+
+main "$@"

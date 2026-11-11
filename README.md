@@ -17,6 +17,26 @@ program with arguments. Everything restores on the next launch.
 > actually wanted to use, so the outcome took priority over code quality:
 > expect pragmatic, unpolished code rather than an example of best practice.
 
+## Install
+
+Linux and macOS:
+
+```bash
+curl -fsSL https://ryandanthony.github.io/wraithcairn/install | bash
+```
+
+Windows (PowerShell):
+
+```powershell
+irm https://ryandanthony.github.io/wraithcairn/install.ps1 | iex
+```
+
+Picks the right build for your OS and CPU (x64 or arm64), verifies its
+SHA-256 and installs it for your user. Re-run to update. Options, uninstall
+and manual downloads:
+[Installation docs](https://ryandanthony.github.io/wraithcairn/docs/getting-started/installation).
+The scripts live in `website/static/` and are published with the docs site.
+
 ## Build & run
 
 Requires the .NET 10 SDK.

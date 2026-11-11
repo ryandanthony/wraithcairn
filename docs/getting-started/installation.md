@@ -5,12 +5,96 @@ title: Installation
 
 # Installation
 
-Wraithcairn is distributed as self-contained release archives, one per
-platform. You can download a pre-built release or build from source.
+Wraithcairn is distributed as self-contained builds for six platforms:
+Linux, Windows and macOS, each on x64 and arm64. No .NET install is
+needed. Use the install script, download a release by hand, or build from
+source.
+
+## Install Script (recommended)
+
+**Linux and macOS:**
+
+```bash
+curl -fsSL https://ryandanthony.github.io/wraithcairn/install | bash
+```
+
+**Windows (PowerShell):**
+
+```powershell
+irm https://ryandanthony.github.io/wraithcairn/install.ps1 | iex
+```
+
+Run the same command again to update. Both scripts pick the build for your
+OS and CPU, download it from
+[GitHub Releases](https://github.com/ryandanthony/wraithcairn/releases),
+check it against the release's `SHA256SUMS`, and install it for your user
+only (no `sudo` or admin rights):
+
+| Platform | What the script installs |
+|----------|--------------------------|
+| Linux x64 / arm64 | `~/.local/bin/wraithcairn`, plus an application launcher entry and icons in `~/.local/share` |
+| macOS Apple Silicon / Intel | `wraithcairn.app` in `/Applications` (or `~/Applications` if that isn't writable), plus a `wraithcairn` command in `~/.local/bin` |
+| Windows x64 / arm64 | `%LOCALAPPDATA%\Programs\wraithcairn\wraithcairn.exe`, a Start menu shortcut, and that folder added to your user `PATH` |
+
+On macOS the script also clears the download quarantine flag, so the first
+launch doesn't need right-click → **Open**. If `~/.local/bin` isn't on your
+`PATH`, the script prints the line to add to your shell profile.
+
+### Options
+
+Pass options to the shell script after `bash -s --`:
+
+```bash
+curl -fsSL https://ryandanthony.github.io/wraithcairn/install | bash -s -- --version v0.1.18
+```
+
+| Option | Environment variable | Effect |
+|--------|----------------------|--------|
+| `--version vX.Y.Z` | `WRAITHCAIRN_VERSION` | Install a specific release instead of the latest |
+| `--dir DIR` | `WRAITHCAIRN_INSTALL_DIR` | Put the `wraithcairn` command in `DIR` (default `~/.local/bin`) |
+| `--app-dir DIR` | `WRAITHCAIRN_APP_DIR` | macOS: where `wraithcairn.app` goes |
+| `--no-desktop` | `WRAITHCAIRN_NO_DESKTOP=1` | Linux: skip the launcher entry and icons |
+| `--uninstall` | | Remove what the script installed |
+
+On Windows, set environment variables before running the one-liner:
+
+```powershell
+$env:WRAITHCAIRN_VERSION = 'v0.1.18'          # a specific release
+$env:WRAITHCAIRN_INSTALL_DIR = 'D:\Tools\wraithcairn'
+$env:WRAITHCAIRN_NO_SHORTCUT = '1'            # no Start menu shortcut
+$env:WRAITHCAIRN_NO_PATH = '1'                # leave PATH alone
+irm https://ryandanthony.github.io/wraithcairn/install.ps1 | iex
+```
+
+### Uninstall
+
+```bash
+curl -fsSL https://ryandanthony.github.io/wraithcairn/install | bash -s -- --uninstall
+```
+
+```powershell
+& ([scriptblock]::Create((irm https://ryandanthony.github.io/wraithcairn/install.ps1))) -Uninstall
+```
+
+The same form takes the other options as parameters, for example
+`-Version v0.1.18`, `-InstallDir D:\Tools\wraithcairn`, `-NoShortcut` or
+`-NoPath`.
+
+Uninstalling leaves your settings and saved layouts alone
+(`~/.config/wraithcairn`, or `%APPDATA%\wraithcairn` on Windows).
+
+### Read before you run
+
+Piping a script into a shell runs it as you. Both scripts are short and
+readable. Look first if you like:
+[`install`](https://ryandanthony.github.io/wraithcairn/install) and
+[`install.ps1`](https://ryandanthony.github.io/wraithcairn/install.ps1)
+(source in
+[`website/static/`](https://github.com/ryandanthony/wraithcairn/tree/main/website/static)).
 
 ## Download a Release
 
-Grab the latest release for your platform from
+To install by hand, grab the latest release for your platform from
 [GitHub Releases](https://github.com/ryandanthony/wraithcairn/releases):
 
 | Platform | Artifact |

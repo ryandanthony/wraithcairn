@@ -28,6 +28,74 @@
   justify-content: center;
 }
 
+.install {
+  max-width: 720px;
+  margin: 0 auto 1.75rem;
+  text-align: left;
+}
+
+.installTabs {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.installTab {
+  background: transparent;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  color: inherit;
+  cursor: pointer;
+  font-size: 0.85rem;
+  opacity: 0.75;
+  padding: 0.3rem 0.9rem;
+}
+
+.installTabActive {
+  background-color: #171f27;
+  border-color: #30363d;
+  color: #eaeaea;
+  opacity: 1;
+}
+
+.installBox {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  background-color: #171f27;
+  border: 1px solid #30363d;
+  border-radius: 0 8px 8px 8px;
+  padding: 0.6rem 0.6rem 0.6rem 1rem;
+}
+
+.installCode {
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  white-space: nowrap;
+  background: transparent;
+  border: none;
+  color: #eaeaea;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
+  font-size: 0.95rem;
+  padding: 0;
+}
+
+.copyButton {
+  flex: none;
+  background-color: #2a3540;
+  border: 1px solid #3d4a57;
+  border-radius: 6px;
+  color: #eaeaea;
+  cursor: pointer;
+  font-size: 0.85rem;
+  padding: 0.3rem 0.8rem;
+}
+
+.copyButton:hover {
+  background-color: #354350;
+}
+
 .cliBadge {
   display: inline-block;
   background-color: #171f27;
