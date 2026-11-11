@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
@@ -1038,6 +1039,80 @@ public sealed class MainWindow : Window
 
             Console.WriteLine($"SELFTEST headers={headersOk} count={tab.Nodes.Count(n => _panes.ContainsKey(n.Key))}");
             Console.WriteLine($"SELFTEST header_running={runningSeen?.StartsWith("sleep", StringComparison.Ordinal) == true} idle_after={runningAfter is null}");
+
+            // Ctrl+C must reach the shell as SIGINT: start a long sleep, send a
+            // real KeyDown through the window (our tunnel handler, then the
+            // terminal), and check the command ends well before 30 s.
+            if (tab.Active is { } intPane && _panes.TryGetValue(intPane, out PaneInfo? intInfo))
+            {
+                intPane.Focus();
+                intPane.SendInput($"sleep 30 # ctrlc-{Guid.NewGuid():N}\n");
+                for (int i = 0; i < 30 && intInfo.RunningCommand is null; i++)
+                {
+                    await Task.Delay(100);
+                }
+
+                bool wasRunning = intInfo.RunningCommand is not null;
+
+                // The reported bug: with text selected, Ctrl+C copied instead of
+                // interrupting. Select everything first to cover that case.
+                intPane.SelectAll();
+                bool hadSelection = intPane.HasSelection;
+                KeyEventArgs ctrlC = new()
+                {
+                    RoutedEvent = KeyDownEvent,
+                    Key = Key.C,
+                    KeyModifiers = KeyModifiers.Control,
+                    Source = intPane,
+                };
+                intPane.RaiseEvent(ctrlC);
+                for (int i = 0; i < 30 && intInfo.RunningCommand is not null; i++)
+                {
+                    await Task.Delay(100);
+                }
+
+                Console.WriteLine($"SELFTEST ctrl_c_interrupts={wasRunning && intInfo.RunningCommand is null} "
+                    + $"was_running={wasRunning} with_selection={hadSelection} handled={ctrlC.Handled} exit={intInfo.LastExitCode}");
+
+                // Ctrl+Shift+C copies the selection; plain Ctrl+V is not paste.
+                Avalonia.Input.Platform.IClipboard? clipboard = Clipboard;
+                if (clipboard is not null)
+                {
+                    string? savedClipboard = await clipboard.TryGetTextAsync();
+                    await clipboard.SetTextAsync("wraithcairn-clip-before");
+                    intPane.SendInput($"echo wraithcairn-clip-{Guid.NewGuid():N}\n");
+                    await Task.Delay(400);
+                    intPane.SelectAll();
+                    KeyEventArgs copyKey = new()
+                    {
+                        RoutedEvent = KeyDownEvent,
+                        Key = Key.C,
+                        KeyModifiers = KeyModifiers.Control | KeyModifiers.Shift,
+                        Source = intPane,
+                    };
+                    intPane.RaiseEvent(copyKey);
+                    await Task.Delay(400);
+                    string? copied = await clipboard.TryGetTextAsync();
+                    Console.WriteLine($"SELFTEST ctrl_shift_c_copies={copied?.Contains("wraithcairn-clip-", StringComparison.Ordinal) == true && copied != "wraithcairn-clip-before"}");
+                    intPane.ClearSelection();
+                    if (savedClipboard is not null)
+                    {
+                        await clipboard.SetTextAsync(savedClipboard);
+                    }
+                }
+                else
+                {
+                    Console.WriteLine("SELFTEST ctrl_shift_c_copies=skipped (no clipboard)");
+                }
+
+                bool menuHasClipboard = _panes.TryGetValue(intPane, out PaneInfo? menuInfo)
+                    && menuInfo.Frame.ContextMenu is { } paneMenu
+                    && paneMenu.Items.OfType<MenuItem>().Any(m => (string?)m.Header == "Copy")
+                    && paneMenu.Items.OfType<MenuItem>().Any(m => (string?)m.Header == "Paste");
+                bool plainKeysFree = !ClipboardKeys.CopyGestures.Any(g => g is { Key: Key.C, Modifiers: KeyModifiers.Control })
+                    && !ClipboardKeys.PasteGestures.Any(g => g is { Key: Key.V, Modifiers: KeyModifiers.Control });
+                Console.WriteLine($"SELFTEST context_menu_clipboard={menuHasClipboard} plain_ctrl_keys_free={plainKeysFree}");
+            }
             int phantoms = tab.Nodes.Keys.Count(c => !ReferenceEquals(c, tab.Active)
                 && _panes.TryGetValue(c, out PaneInfo? pi) && pi.RunningCommand is not null);
             Console.WriteLine($"SELFTEST idle_panes_clean={phantoms == 0}");
@@ -1288,6 +1363,11 @@ public sealed class MainWindow : Window
 
     private void OnShortcut(object? sender, KeyEventArgs e)
     {
+        if (Environment.GetEnvironmentVariable("WRAITHCAIRN_TRACE") == "1")
+        {
+            Console.WriteLine($"TRACE key {e.Key} mods={e.KeyModifiers} sym={e.KeySymbol} phys={e.PhysicalKey} src={e.Source?.GetType().Name} focus={FocusManager?.GetFocusedElement()?.GetType().Name}");
+        }
+
         bool ctrlShift = e.KeyModifiers.HasFlag(KeyModifiers.Control)
             && e.KeyModifiers.HasFlag(KeyModifiers.Shift);
         bool ctrl = e.KeyModifiers.HasFlag(KeyModifiers.Control);
@@ -1345,6 +1425,34 @@ public sealed class MainWindow : Window
 
     // ----- terminal / pane creation ---------------------------------------
 
+    /// <summary>
+    /// Clipboard keys: copy is Ctrl+Shift+C and paste is Ctrl+Shift+V (plus
+    /// Ctrl+Insert / Shift+Insert, and Cmd on macOS). RoyalTerminal's defaults
+    /// also bind plain Ctrl+V to paste and Ctrl+C to copy while text is
+    /// selected, which stole those keys from the shell (no SIGINT with a
+    /// selection, no literal-next in readline/vim). Plain Ctrl+C/V/X/A now
+    /// always go to the program.
+    /// </summary>
+    private static readonly TerminalShortcutConfiguration ClipboardKeys = new(
+        copyGestures:
+        [
+            new(Key.C, KeyModifiers.Control | KeyModifiers.Shift),
+            new(Key.Insert, KeyModifiers.Control, RequiresSelection: true),
+            new(Key.C, KeyModifiers.Meta),
+        ],
+        pasteGestures:
+        [
+            new(Key.V, KeyModifiers.Control | KeyModifiers.Shift),
+            new(Key.Insert, KeyModifiers.Shift),
+            new(Key.V, KeyModifiers.Meta),
+        ],
+        cutGestures: [],
+        selectAllGestures:
+        [
+            new(Key.A, KeyModifiers.Control | KeyModifiers.Shift),
+            new(Key.A, KeyModifiers.Meta),
+        ]);
+
     private TerminalControl CreateTerminal()
     {
         TerminalControl terminal = new(
@@ -1360,6 +1468,7 @@ public sealed class MainWindow : Window
             Rows = 30,
             ScrollbackLimit = 10_000,
             TerminalFontSize = _fontSize,
+            ShortcutConfiguration = ClipboardKeys,
         };
 
         if (!string.IsNullOrWhiteSpace(Config.FontFamily))
@@ -1642,6 +1751,24 @@ public sealed class MainWindow : Window
 
     private ContextMenu BuildPaneContextMenu(TerminalControl terminal)
     {
+        static KeyGesture CtrlShift(Key key) => new(key, KeyModifiers.Control | KeyModifiers.Shift);
+
+        MenuItem copy = new() { Header = "Copy", InputGesture = CtrlShift(Key.C) };
+        copy.Click += async (_, _) =>
+        {
+            if (terminal.HasSelection)
+            {
+                await terminal.CopySelectionAsync();
+            }
+
+            terminal.Focus();
+        };
+        MenuItem paste = new() { Header = "Paste", InputGesture = CtrlShift(Key.V) };
+        paste.Click += async (_, _) =>
+        {
+            terminal.Focus();
+            await terminal.PasteAsync();
+        };
         MenuItem configure = new() { Header = "Configure Pane…" };
         configure.Click += (_, _) => { terminal.Focus(); _ = ConfigurePaneAsync(); };
         MenuItem restart = new() { Header = "Restart Pane" };
@@ -1654,6 +1781,9 @@ public sealed class MainWindow : Window
         close.Click += (_, _) => ClosePane(terminal);
 
         ContextMenu menu = new();
+        menu.Items.Add(copy);
+        menu.Items.Add(paste);
+        menu.Items.Add(new Separator());
         menu.Items.Add(configure);
         menu.Items.Add(restart);
         menu.Items.Add(new Separator());
@@ -1661,6 +1791,13 @@ public sealed class MainWindow : Window
         menu.Items.Add(down);
         menu.Items.Add(new Separator());
         menu.Items.Add(close);
+
+        // Right-click focuses that pane; Copy is only useful with a selection.
+        menu.Opening += (_, _) =>
+        {
+            copy.IsEnabled = terminal.HasSelection;
+            terminal.Focus();
+        };
         return menu;
     }
 

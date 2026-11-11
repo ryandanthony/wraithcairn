@@ -70,6 +70,8 @@ layout, the layout itself closes.
 Right-clicking a pane opens a context menu with the same core pane
 actions available from the keyboard or **Pane** menu:
 
+- **Copy** (`Ctrl+Shift+C`, enabled when text is selected)
+- **Paste** (`Ctrl+Shift+V`)
 - **Configure Pane…**
 - **Restart Pane**
 - **Split Right**

@@ -106,7 +106,7 @@ Saved 5 s after layout changes, on window close, and on exit/SIGTERM/SIGINT.
 | `Ctrl+Shift+=` | Equalize splits |
 | `Ctrl+Shift+P` | Configure pane (folder, program, args) |
 | `Ctrl+Shift+R` | Restart pane |
-| `Ctrl+Shift+C` / `Ctrl+Shift+V` | Copy selection / paste |
+| `Ctrl+Shift+C` / `Ctrl+Shift+V` | Copy selection / paste (plain `Ctrl+C` / `Ctrl+V` always go to the program) |
 | `Ctrl+Shift+F` | Find (Enter next, Shift+Enter prev, Esc close) |
 | `Ctrl+Shift+K` | Clear scrollback |
 | `Ctrl+PgUp` / `Ctrl+PgDn` | Previous / next layout |

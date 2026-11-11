@@ -21,8 +21,8 @@ Every shortcut below is also available from the menu bar (**Shell**,
 | `Ctrl+Shift+=` | Equalize splits |
 | `Ctrl+Shift+P` | Configure pane (folder, program, args) |
 | `Ctrl+Shift+R` | Restart pane |
-| `Ctrl+Shift+C` | Copy selection |
-| `Ctrl+Shift+V` | Paste |
+| `Ctrl+Shift+C` | Copy selection (also `Ctrl+Insert`) |
+| `Ctrl+Shift+V` | Paste (also `Shift+Insert`) |
 | `Ctrl+Shift+F` | Find (`Enter` next, `Shift+Enter` previous, `Esc` close) |
 | `Ctrl+Shift+K` | Clear scrollback |
 | `Ctrl+PgUp` | Previous layout |
@@ -32,6 +32,10 @@ Every shortcut below is also available from the menu bar (**Shell**,
 | `Alt+1..9` | Switch to layout *N* |
 | `Ctrl+=` | Bigger text |
 | `Ctrl+-` | Smaller text |
+
+Plain `Ctrl+C`, `Ctrl+V`, `Ctrl+X` and `Ctrl+A` are never taken by
+wraithcairn: they always go to the running program (interrupt, literal-next,
+and so on), even when text is selected.
 
 ## Mouse
 
