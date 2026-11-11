@@ -245,13 +245,34 @@ install_windows() {
   warn "  irm $DOCS/install.ps1 | iex"
 }
 
+uninstall_linux_desktop() {
+  # Done here, not with `wraithcairn --uninstall-desktop`: older releases
+  # need a display for that, and the binary may already be gone. Only an
+  # entry wraithcairn generated (marker line) is removed.
+  local data="${XDG_DATA_HOME:-$HOME/.local/share}" entry size
+  entry="$data/applications/wraithcairn.desktop"
+  if [ -f "$entry" ] && grep -qx 'X-Wraithcairn-Generated=true' "$entry"; then
+    rm -f "$entry"
+    ok "Removed $entry"
+    for size in 16 32 48 64 128 256 512; do
+      rm -f "$data/icons/hicolor/${size}x${size}/apps/wraithcairn.png"
+    done
+    if command -v update-desktop-database >/dev/null 2>&1; then
+      update-desktop-database "$data/applications" >/dev/null 2>&1 || true
+    fi
+    if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+      gtk-update-icon-cache -f -t "$data/icons/hicolor" >/dev/null 2>&1 || true
+    fi
+  elif [ -f "$entry" ]; then
+    info "Left $entry alone (not written by wraithcairn)"
+  fi
+}
+
 uninstall() {
   local bin="$INSTALL_DIR/wraithcairn" removed=0 app
   case "$PLATFORM" in
     linux)
-      if [ -x "$bin" ]; then
-        "$bin" --uninstall-desktop >/dev/null 2>&1 || true
-      fi
+      uninstall_linux_desktop
       ;;
     macos)
       app="$(pick_app_dir)/wraithcairn.app"
