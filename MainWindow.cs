@@ -206,7 +206,7 @@ public sealed class MainWindow : Window
 
         _searchBox = new TextBox
         {
-            Watermark = "find…",
+            PlaceholderText = "find…",
             Width = 280,
             FontSize = 12,
         };
@@ -1451,7 +1451,7 @@ public sealed class MainWindow : Window
 
             using Avalonia.Media.Imaging.RenderTargetBitmap bitmap = new(size, new Vector(96, 96));
             bitmap.Render(control);
-            bitmap.Save(path);
+            bitmap.Save(path, Avalonia.Media.Imaging.PngBitmapEncoderOptions.Default);
         }
         catch (Exception ex)
         {

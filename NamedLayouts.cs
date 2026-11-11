@@ -72,10 +72,13 @@ public static class NamedLayouts
         };
 
         // `dotnet run` / `dotnet app.dll` hosts: pass the dll first.
-        string? entry = System.Reflection.Assembly.GetEntryAssembly()?.Location;
-        if (Path.GetFileNameWithoutExtension(exe) == "dotnet" && entry is not null)
+        // Assembly.Location is empty in single-file builds (IL3000), so build
+        // the dll path from AppContext.BaseDirectory. Only the dotnet host
+        // path needs it, and that is never single-file.
+        string? entryName = System.Reflection.Assembly.GetEntryAssembly()?.GetName().Name;
+        if (Path.GetFileNameWithoutExtension(exe) == "dotnet" && entryName is not null)
         {
-            psi.ArgumentList.Add(entry);
+            psi.ArgumentList.Add(Path.Combine(AppContext.BaseDirectory, entryName + ".dll"));
         }
 
         psi.ArgumentList.Add("--workspace");

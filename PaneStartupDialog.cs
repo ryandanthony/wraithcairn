@@ -41,7 +41,7 @@ public sealed class PaneStartupDialog : Window
         _directory = new TextBox
         {
             Text = current.Directory ?? string.Empty,
-            Watermark = $"blank = keep last folder ({currentCwd})",
+            PlaceholderText = $"blank = keep last folder ({currentCwd})",
             Width = 380,
         };
         Button browse = new() { Content = "Browse\u2026", Margin = new Thickness(6, 0, 0, 0) };
@@ -58,13 +58,13 @@ public sealed class PaneStartupDialog : Window
         _command = new TextBox
         {
             Text = current.Command ?? string.Empty,
-            Watermark = "blank = just a shell (e.g. htop, npm, docker, ssh)",
+            PlaceholderText = "blank = just a shell (e.g. htop, npm, docker, ssh)",
             Width = 470,
         };
         _args = new TextBox
         {
             Text = PaneStartup.JoinArgs(current.Args),
-            Watermark = "arguments, quoted like a shell: run dev --port \"8080\"",
+            PlaceholderText = "arguments, quoted like a shell: run dev --port \"8080\"",
             Width = 470,
         };
 

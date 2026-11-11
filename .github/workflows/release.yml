@@ -38,18 +38,18 @@ jobs:
       informational: ${{ steps.gitversion.outputs.informationalVersion }}
     steps:
       - name: Checkout (full history for GitVersion)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
       - name: Install GitVersion
-        uses: gittools/actions/gitversion/setup@v3.2.1
+        uses: gittools/actions/gitversion/setup@v4.7.0
         with:
           versionSpec: "6.x"
 
       - name: Determine version
         id: gitversion
-        uses: gittools/actions/gitversion/execute@v3.2.1
+        uses: gittools/actions/gitversion/execute@v4.7.0
 
       - name: Export version vars
         id: vars
@@ -98,10 +98,10 @@ jobs:
             app: true
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: "10.0.x"
 
@@ -149,7 +149,7 @@ jobs:
           zip -qr ../wraithcairn-${{ needs.version.outputs.version }}-${{ matrix.rid }}.zip wraithcairn
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: wraithcairn-${{ matrix.rid }}
           path: wraithcairn-${{ needs.version.outputs.version }}-${{ matrix.rid }}.${{ matrix.ext }}
@@ -159,7 +159,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: artifacts
           merge-multiple: true
@@ -171,7 +171,7 @@ jobs:
           cat SHA256SUMS
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ needs.version.outputs.tag }}
           name: wraithcairn ${{ needs.version.outputs.tag }}
@@ -185,7 +185,7 @@ jobs:
             |---|---|
             | Linux x64 | `wraithcairn-${{ needs.version.outputs.version }}-linux-x64.tar.gz` |
             | Windows x64 | `wraithcairn-${{ needs.version.outputs.version }}-win-x64.zip` |
-            | macOS Apple Silicon | `wraithcairn-${{ needs.version.outputs.version }}-osx-arm64.tar.gz` |
-            | macOS Intel | `wraithcairn-${{ needs.version.outputs.version }}-osx-x64.tar.gz` |
+            | macOS Apple Silicon | `wraithcairn-${{ needs.version.outputs.version }}-osx-arm64.zip` (`wraithcairn.app`) |
+            | macOS Intel | `wraithcairn-${{ needs.version.outputs.version }}-osx-x64.zip` (`wraithcairn.app`) |
 
             Commit: ${{ github.sha }}
