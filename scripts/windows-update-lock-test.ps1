@@ -59,7 +59,10 @@ while ((Get-Date) -lt `$until) {
 T 'released'
 New-Item '$released' | Out-Null
 "@
-$locker = Start-Process pwsh -PassThru -NoNewWindow -ArgumentList '-NoProfile', '-Command', $lockScript
+$lockFile = Join-Path $tmp "lock-$id.ps1"
+Set-Content -Path $lockFile -Value $lockScript
+$locker = Start-Process pwsh -PassThru -NoNewWindow -RedirectStandardError (Join-Path $tmp "lock-$id.err") `
+    -ArgumentList '-NoProfile', '-File', "`"$lockFile`""
 while (-not (Test-Path $ready)) { Start-Sleep -Milliseconds 25 }
 
 # Prove the lock reproduces the flake: a plain rename must fail right now.
@@ -79,7 +82,8 @@ $elapsed = $sw.Elapsed.TotalSeconds
 $locker.WaitForExit()
 $out = (Get-Content -Raw $log) + (Get-Content -Raw $err)
 $out
-"lock trace:"; Get-Content "$tmp\lock-$id.trace" | ForEach-Object { "  $_" }
+"lock trace:"; Get-Content "$tmp\lock-$id.trace" -ErrorAction SilentlyContinue | ForEach-Object { "  $_" }
+Get-Content (Join-Path $tmp "lock-$id.err") -ErrorAction SilentlyContinue | ForEach-Object { "  locker stderr: $_" }
 "update finished $($finished.ToString('HH:mm:ss.fff')); installed now: $(& $Exe --version | Select-Object -First 1)"
 $lockedDuringInstall = Test-Path $released
 # The update must still have been running when the lock went away, i.e. it
