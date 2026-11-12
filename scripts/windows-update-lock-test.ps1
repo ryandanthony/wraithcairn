@@ -3,8 +3,9 @@
   without FILE_SHARE_DELETE, like Defender or the search indexer briefly do.
   That makes the updater's rename fail with "being used by another process"
   (the flake seen on win-arm64). The lock is taken before the update starts
-  and released HoldSeconds after the updater prints "Installing", so it is
-  held exactly while the exe is being swapped, however long the download is.
+  and released HoldSeconds after the updater has finished unpacking the new
+  exe (the very next thing it does is rename the old one), so the rename is
+  guaranteed to run into it, however long the download and unzip take.
 
     -ExpectFail   the updater has no retry (v0.1.32 and older): it must fail
                   with the sharing-violation message
@@ -23,18 +24,26 @@ $log = Join-Path $tmp "update-$id.log"
 $err = Join-Path $tmp "update-$id.err"
 $ready = Join-Path $tmp "lock-$id.ready"
 $released = Join-Path $tmp "lock-$id.released"
+# Updater.InstallAsync unpacks into %TEMP%\wraithcairn-update-*\unpacked.
+$tempRoot = [IO.Path]::GetTempPath()
+$before = @(Get-ChildItem $tempRoot -Directory -Filter 'wraithcairn-update-*' -ErrorAction SilentlyContinue | ForEach-Object FullName)
 
 $lockScript = @"
 `$fs = [IO.File]::Open('$Exe', 'Open', 'Read', 'Read')
 New-Item '$ready' | Out-Null
+`$before = @('$($before -join "','")')
 `$deadline = (Get-Date).AddSeconds(180)
-while ((Get-Date) -lt `$deadline) {
-  if (Test-Path '$log') {
-    `$r = [IO.File]::Open('$log', 'Open', 'Read', 'ReadWrite,Delete')
-    `$text = (New-Object IO.StreamReader(`$r)).ReadToEnd(); `$r.Close()
-    if (`$text -match 'Installing') { break }
+`$unpacked = `$false
+while (-not `$unpacked -and (Get-Date) -lt `$deadline) {
+  foreach (`$d in Get-ChildItem '$tempRoot' -Directory -Filter 'wraithcairn-update-*' -ErrorAction SilentlyContinue) {
+    if (`$before -contains `$d.FullName) { continue }
+    `$fresh = Join-Path `$d.FullName 'unpacked\wraithcairn\wraithcairn.exe'
+    if (Test-Path `$fresh) {
+      # Still being extracted while the zip code holds it open exclusively.
+      try { `$probe = [IO.File]::Open(`$fresh, 'Open', 'Read', 'ReadWrite'); `$probe.Close(); `$unpacked = `$true } catch { }
+    }
   }
-  Start-Sleep -Milliseconds 25
+  Start-Sleep -Milliseconds 10
 }
 Start-Sleep -Milliseconds $([int]($HoldSeconds * 1000))
 `$fs.Close()
@@ -64,7 +73,7 @@ $lockedDuringInstall = Test-Path $released
 # The update must still have been running when the lock went away, i.e. it
 # really ran into the lock rather than finishing first.
 $outlastedLock = $lockedDuringInstall -and (Get-Item $released).CreationTime -lt $finished
-"update exit=$($p.ExitCode) after $([math]::Round($elapsed, 1))s; lock held until after 'Installing': $lockedDuringInstall; update still running when it was released: $outlastedLock"
+"update exit=$($p.ExitCode) after $([math]::Round($elapsed, 1))s; lock held until ${HoldSeconds}s after unpack: $lockedDuringInstall; update still running when it was released: $outlastedLock"
 if (-not $lockedDuringInstall) { throw 'the lock was not held through the install step' }
 
 if ($ExpectFail) {
