@@ -27,6 +27,7 @@ $log = Join-Path $tmp "update-$id.log"
 $err = Join-Path $tmp "update-$id.err"
 $ready = Join-Path $tmp "lock-$id.ready"
 $released = Join-Path $tmp "lock-$id.released"
+$done = Join-Path $tmp "lock-$id.done"
 $trace = Join-Path $tmp "lock-$id.trace"
 $lockFile = Join-Path $tmp "lock-$id.ps1"
 $lockErr = Join-Path $tmp "lock-$id.err"
@@ -41,6 +42,7 @@ $lockScript = @"
 `$ErrorActionPreference = 'Continue'
 function T(`$m) { Add-Content '$trace' "`$((Get-Date).ToString('HH:mm:ss.fff')) `$m" }
 function OldSeen { [bool](Get-ChildItem '$installDir' -Filter '*.old' -ErrorAction SilentlyContinue) }
+function Done { Test-Path '$done' }
 `$fs = [IO.File]::Open('$Exe', 'Open', 'Read', 'Read')
 T 'locked'
 New-Item '$ready' | Out-Null
@@ -49,7 +51,7 @@ New-Item '$ready' | Out-Null
 `$expected = `$null
 `$extracted = `$false
 `$oldSeen = `$false
-while (-not `$extracted -and (Get-Date) -lt `$deadline) {
+while (-not `$extracted -and -not (Done) -and (Get-Date) -lt `$deadline) {
   if (-not `$oldSeen -and (OldSeen)) { `$oldSeen = `$true; T 'old exe renamed before extraction finished?!' }
   foreach (`$d in Get-ChildItem '$tempRoot' -Directory -Filter 'wraithcairn-update-*' -ErrorAction SilentlyContinue) {
     if (`$before -contains `$d.FullName) { continue }
@@ -75,7 +77,7 @@ while (-not `$extracted -and (Get-Date) -lt `$deadline) {
   Start-Sleep -Milliseconds 5
 }
 `$until = (Get-Date).AddMilliseconds($([int]($HoldSeconds * 1000)))
-while ((Get-Date) -lt `$until) {
+while ((Get-Date) -lt `$until -and -not (Done)) {
   if (-not `$oldSeen -and (OldSeen)) { `$oldSeen = `$true; T 'old exe renamed WHILE LOCKED?!' }
   Start-Sleep -Milliseconds 5
 }
@@ -110,6 +112,7 @@ $p = Start-Process $Exe -ArgumentList 'update' -PassThru -NoNewWindow -Wait `
     -RedirectStandardOutput $log -RedirectStandardError $err
 $finished = Get-Date
 $elapsed = $sw.Elapsed.TotalSeconds
+New-Item $done -ErrorAction SilentlyContinue | Out-Null
 $locker.WaitForExit()
 $out = (Get-Content -Raw $log) + (Get-Content -Raw $err)
 $out
@@ -123,15 +126,20 @@ $heldThroughExtract = $traceText -match 'new exe extracted' -and (Test-Path $rel
 $renamedEarly = $traceText -match '\?!'
 $outlastedLock = $heldThroughExtract -and (Get-Item $released).CreationTime -lt $finished
 "update exit=$($p.ExitCode) after $([math]::Round($elapsed, 1))s; held ${HoldSeconds}s past extraction: $heldThroughExtract; update outlasted the lock: $outlastedLock"
-if (-not $heldThroughExtract) { throw 'the lock was not held through extraction' }
 if ($renamedEarly) { throw 'the old exe was renamed while it should have been locked: lock not effective' }
 
 if ($ExpectFail) {
+    # A pre-retry updater fails at the very first rename attempt and exits
+    # within ~1s, long before extraction can be observed by the watcher
+    # (its finally-block also deletes the temp unpack dir). The sharing
+    # violation itself is proof the lock was effective at rename time, so
+    # $heldThroughExtract/$outlastedLock are not required here.
     if ($p.ExitCode -eq 0 -or $out -notmatch 'being used by another process') {
         throw "expected the update to fail with a sharing violation (exit $($p.ExitCode))"
     }
     'OK: updater without retry fails under the lock (reproduces the flake)'
 } else {
+    if (-not $heldThroughExtract) { throw 'the lock was not held through extraction' }
     if ($p.ExitCode -ne 0) { throw "update failed under the lock (exit $($p.ExitCode))" }
     if (-not $outlastedLock) { throw 'update finished before the lock was released: lock not exercised' }
     'OK: updater waited out the lock and installed'
