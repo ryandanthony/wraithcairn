@@ -470,17 +470,43 @@ public static class Updater
             old = $"{target}.{Environment.ProcessId}.old";
         }
 
-        File.Move(target, old); // a running exe can be renamed, not overwritten
+        RetryWhileLocked(() => File.Move(target, old)); // a running exe can be renamed, not overwritten
         try
         {
-            File.Copy(fresh, target);
+            RetryWhileLocked(() => File.Copy(fresh, target, overwrite: true));
         }
         catch
         {
-            File.Move(old, target);
+            RetryWhileLocked(() => File.Move(old, target, overwrite: true));
             throw;
         }
     }
+
+    /// <summary>
+    /// Retries a file operation that failed with a sharing violation. Windows
+    /// Defender and the search indexer briefly open a freshly written exe,
+    /// which makes rename/copy fail with "being used by another process"
+    /// (seen on the win-arm64 install test). A few seconds is plenty.
+    /// </summary>
+    private static void RetryWhileLocked(Action action)
+    {
+        for (int attempt = 1; ; attempt++)
+        {
+            try
+            {
+                action();
+                return;
+            }
+            catch (IOException ex) when (attempt < 20 && IsSharingViolation(ex))
+            {
+                Thread.Sleep(250);
+            }
+        }
+    }
+
+    // ERROR_SHARING_VIOLATION (32) / ERROR_LOCK_VIOLATION (33) as HRESULTs.
+    private static bool IsSharingViolation(IOException ex) =>
+        (ex.HResult & 0xFFFF) is 32 or 33;
 
     /// <summary>Windows: removes the exe left behind by the last update.</summary>
     public static void CleanupAfterUpdate()
