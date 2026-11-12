@@ -179,6 +179,7 @@ public sealed class MainWindow : Window
         _pendingRestore = restore;
         _isPrimary = isPrimary;
         _shell = ShellIntegration.Resolve(Config.Shell);
+        LoginEnvironment.Prefetch(ShellIntegration.UserShell(Config.Shell));
         Windows.Add(this);
         Activated += (_, _) => _lastFocused = this;
         Opened += (_, _) => LinuxWindowIdentity.Apply(this);
@@ -2086,7 +2087,8 @@ public sealed class MainWindow : Window
             ["KITTY_WINDOW_ID"] = Interlocked.Increment(ref s_kittyWindowId)
                 .ToString(System.Globalization.CultureInfo.InvariantCulture),
         };
-        if (_shell.Environment is not null)
+        // Shell-only env (zsh's ZDOTDIR redirect) stays out of exec panes.
+        if (_shell.Environment is not null && startup is not { IsExec: true })
         {
             foreach ((string key, string value) in _shell.Environment)
             {
@@ -2094,14 +2096,44 @@ public sealed class MainWindow : Window
             }
         }
 
+        // Finder/Dock launches on macOS have no LANG; Terminal.app sets one,
+        // and without it zsh, starship and friends mangle UTF-8.
+        if (LoginEnvironment.Enabled && LoginEnvironment.DefaultLang() is { } lang)
+        {
+            environment["LANG"] = lang;
+        }
+
         // Configured directory wins over the last-seen cwd.
         string? directory = startup?.ResolveDirectory()
             ?? (Directory.Exists(workingDirectory) ? workingDirectory : null)
             ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
-        TerminalCommandSpec? command = startup is { IsExec: true }
-            ? new TerminalCommandSpec(startup.Command!.Trim(), startup.Args)
-            : _shell.Command;
+        TerminalCommandSpec? command = _shell.Command;
+        if (startup is { IsExec: true })
+        {
+            // No shell in between, so no login files run: take PATH etc.
+            // from the login shell captured at startup (macOS), and resolve
+            // the program on that PATH ourselves.
+            foreach ((string key, string value) in await LoginEnvironment.GetAsync(ShellIntegration.UserShell(Config.Shell)))
+            {
+                environment.TryAdd(key, value);
+            }
+
+            string program = startup.Command!.Trim();
+            if (program.StartsWith("~/", StringComparison.Ordinal))
+            {
+                program = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), program[2..]);
+            }
+
+            string? path = environment.TryGetValue("PATH", out string? p) ? p : Environment.GetEnvironmentVariable("PATH");
+            string resolved = LoginEnvironment.ResolveCommand(program, path);
+            command = new TerminalCommandSpec(resolved, startup.Args);
+            if (!OperatingSystem.IsWindows() && !resolved.Contains('/'))
+            {
+                terminal.WriteOutput(System.Text.Encoding.UTF8.GetBytes(
+                    $"\x1b[33m[wraithcairn: {program} not found on PATH={path}]\x1b[0m\r\n"));
+            }
+        }
 
         PtyTransportOptions options = new(
             Command: command,

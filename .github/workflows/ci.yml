@@ -97,6 +97,18 @@ jobs:
           echo "$OUTPUT" | grep -q "SELFTEST mac_ctrl_letters=True"
           rm -f ~/.config/wraithcairn/workspace.json
 
+      # Finder/Dock launch on macOS: bare launchd PATH, Homebrew PATH only in
+      # ~/.zprofile. zsh shell panes and exec panes must still find tools.
+      - name: Login PATH (zsh, Finder-style launch)
+        if: matrix.os != 'windows-latest'
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            sudo apt-get install -y zsh xvfb
+            WRAITHCAIRN_LOGIN=1 xvfb-run -a scripts/test-login-path.sh
+          else
+            scripts/test-login-path.sh
+          fi
+
       # Releases ship single-file executables; make sure that packaging still
       # finds libghostty-vt and can spawn a PTY.
       - name: Selftest (single-file publish)

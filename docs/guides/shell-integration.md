@@ -16,7 +16,7 @@ terminal a sense of where each prompt and command starts.
 | Shell | Mechanism |
 |---|---|
 | `bash` | Launched as `bash --rcfile <generated file>`. The generated file sources your normal `~/.bashrc` first, then appends the integration snippet. |
-| `zsh` | Launched with `ZDOTDIR` pointed at a generated directory. Its `.zshrc` restores your real `ZDOTDIR` (or `$HOME`) and sources your normal `.zshrc`, then appends the snippet. |
+| `zsh` | Launched with `ZDOTDIR` pointed at a generated directory holding stand-ins for `.zshenv`, `.zprofile`, `.zshrc` and `.zlogin`. Each one sources your real file with `ZDOTDIR` set to your own (or `$HOME`, or whatever your `~/.zshenv` sets it to), and `.zshrc` then appends the snippet. Once startup finishes, `ZDOTDIR` is back to yours, so nested shells behave normally. |
 | `fish` | Launched as `fish --init-command 'source <snippet.fish>'`. |
 | `pwsh` | Launched as `pwsh -NoExit -Command '. <snippet.ps1>'`; your normal PowerShell profile still loads. |
 | anything else (e.g. `cmd`) | Launched plainly, with no integration. Working-directory restore falls back to whatever was last observed. |
@@ -24,6 +24,33 @@ terminal a sense of where each prompt and command starts.
 In every integrated case, your existing shell startup files run exactly as
 they normally would; the integration snippet is appended after them, not
 instead of them.
+
+## macOS: Login Shells and PATH
+
+A Mac app started from Finder, the Dock or Spotlight gets launchd's bare
+environment: `PATH=/usr/bin:/bin:/usr/sbin:/sbin` and no `LANG`. On macOS
+your real PATH comes from **login** files: `/etc/zprofile` runs
+`path_helper`, and Homebrew's `eval "$(brew shellenv)"` usually lives in
+`~/.zprofile`. So on macOS Wraithcairn does what Terminal.app, iTerm2 and
+Ghostty do:
+
+- **Shell panes start as login shells** (`zsh -l`, `fish --login`; for
+  bash the generated rc file runs `/etc/profile` and then the first of
+  `~/.bash_profile`, `~/.bash_login`, `~/.profile`). Tools like
+  `starship`, `jcode` or anything from Homebrew are found.
+- **Exec panes** (`runInShell: false`) have no shell in between, so at
+  startup Wraithcairn runs your shell once as `$SHELL -l -i -c env` in the
+  background and gives those panes its `PATH` (and any variables your
+  login files add). The program is looked up on that PATH; if it still
+  isn't found the pane says so and shows the PATH it searched. While this
+  runs, `WRAITHCAIRN_RESOLVING_ENV=1` is set, so a slow rc file can skip
+  work.
+- **`LANG`** defaults to your locale with UTF-8 (e.g. `en_US.UTF-8`) when
+  nothing set one.
+
+`WRAITHCAIRN_LOGIN=1` turns this on for other platforms (useful from a
+Linux desktop launcher that has a minimal PATH), `WRAITHCAIRN_LOGIN=0`
+turns it off on macOS.
 
 ## Which Shell Is Used
 
