@@ -193,8 +193,30 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or $help -notmatch 'usage: wraithcairn update') { "wraithcairn $installed has no update command yet; skipping"; exit 0 }
           & $exe update --check | Out-Host
           if ($LASTEXITCODE -ne 10) { throw "expected exit 10 (update available), got $LASTEXITCODE" }
+          # Reproduce the flake seen on win-arm64 ("being used by another
+          # process"): something like Defender or the indexer holds the exe
+          # open without FILE_SHARE_DELETE for a moment, so the rename fails.
+          # Releases from v0.1.33 retry for ~5s; hold a lock for 3s.
+          $ma, $mi, $pa = $installed -split '\.'
+          $retries = ([int]$ma -gt 0) -or ([int]$mi -gt 1) -or ([int]$pa -ge 33)
+          if ($retries) {
+            $ready = Join-Path $env:RUNNER_TEMP 'lock-ready'
+            Remove-Item $ready -ErrorAction SilentlyContinue
+            $locker = Start-Process pwsh -PassThru -NoNewWindow -ArgumentList '-NoProfile', '-Command', `
+              "`$fs = [IO.File]::Open('$exe', 'Open', 'Read', 'Read'); New-Item '$ready' | Out-Null; Start-Sleep 3; `$fs.Close()"
+            while (-not (Test-Path $ready)) { Start-Sleep -Milliseconds 50 }
+            # The lock really does break a plain rename, like in the flake.
+            $probe = $null
+            try { [IO.File]::Move($exe, "$exe.probe"); [IO.File]::Move("$exe.probe", $exe); $probe = 'rename worked' }
+            catch { $probe = $_.Exception.InnerException.Message ?? $_.Exception.Message }
+            "while locked: $probe"
+            if ($probe -notmatch 'being used by another process') { throw "lock did not reproduce the sharing violation: $probe" }
+          }
+          $sw = [Diagnostics.Stopwatch]::StartNew()
           & $exe update | Out-Host
           if ($LASTEXITCODE -ne 0) { throw "update failed ($LASTEXITCODE)" }
+          "update took $([int]$sw.Elapsed.TotalSeconds)s"
+          if ($retries) { $locker.WaitForExit() }
           $v = & $exe --version | Select-Object -First 1
           "now: $v"
           if ($v -eq "wraithcairn $installed") { throw 'still on the old version' }
