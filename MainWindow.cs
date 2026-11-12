@@ -189,6 +189,7 @@ public sealed class MainWindow : Window
         Width = 1200;
         Height = 800;
         Background = ChromeBrush();
+        ApplyChromeVariant(s_paintedTheme ?? Config.ResolvedTheme);
 
         _layoutHost = new ContentControl
         {
@@ -502,7 +503,10 @@ public sealed class MainWindow : Window
         // pane afterwards (unless the action opened the find bar).
         menu.Closed += (_, _) => Dispatcher.UIThread.Post(() =>
         {
-            if (!_searchBar.IsVisible)
+            // Not when the action opened the find bar or a dialog (Themes,
+            // Configure Pane...): focusing the pane would pull keyboard focus
+            // back to this window and typing would land in the shell.
+            if (!_searchBar.IsVisible && !OwnedWindows.Any(w => w.IsVisible))
             {
                 ActiveTab()?.Active?.Focus();
             }
@@ -1574,7 +1578,7 @@ public sealed class MainWindow : Window
             await Task.Delay(150);
             string configText = File.Exists(AppConfig.AppConfigPath) ? File.ReadAllText(AppConfig.AppConfigPath) : string.Empty;
             bool downloaded = File.Exists(Path.Combine(AppConfig.UserThemesDir, first.Name));
-            bool saved = configText.Contains($"\"theme\": {System.Text.Json.JsonSerializer.Serialize(first.Name)}", StringComparison.Ordinal)
+            bool saved = configText.Contains($"\"theme\": \"{first.Name}\"", StringComparison.Ordinal)
                 && AppConfig.Load(writeDefault: false).Theme == first.Name;
             bool commentsKept = originalConfig is null || !originalConfig.Contains("//", StringComparison.Ordinal)
                 || configText.Contains("//", StringComparison.Ordinal);
@@ -3382,6 +3386,7 @@ public sealed class MainWindow : Window
     private void PaintTheme(TerminalTheme? theme)
     {
         Background = ChromeBrush(theme);
+        ApplyChromeVariant(theme);
         (Color background, Color foreground) = HeaderColors(theme);
         foreach (Tab tab in _tabs)
         {
@@ -3398,6 +3403,39 @@ public sealed class MainWindow : Window
 
     /// <summary>Shows a theme on every pane without saving it (picker preview).</summary>
     internal static void PreviewTheme(TerminalTheme theme) => PaintThemeEverywhere(theme);
+
+    /// <summary>
+    /// Menus, status bar and dialogs follow the terminal background: a light
+    /// theme switches Fluent to its Light variant so the menu text stays
+    /// readable (dark text on a light window).
+    /// </summary>
+    internal static void ApplyChromeVariant(TerminalTheme? theme)
+    {
+        if (Application.Current is not { } app)
+        {
+            return;
+        }
+
+        Avalonia.Styling.ThemeVariant variant = IsLight(theme)
+            ? Avalonia.Styling.ThemeVariant.Light
+            : Avalonia.Styling.ThemeVariant.Dark;
+        if (app.RequestedThemeVariant != variant)
+        {
+            app.RequestedThemeVariant = variant;
+        }
+    }
+
+    internal static bool IsLight(TerminalTheme? theme)
+    {
+        if (theme is null)
+        {
+            return false;
+        }
+
+        uint bg = theme.DefaultBackground;
+        double luminance = ((0.2126 * ((bg >> 16) & 0xFF)) + (0.7152 * ((bg >> 8) & 0xFF)) + (0.0722 * (bg & 0xFF))) / 255.0;
+        return luminance >= 0.5;
+    }
 
     /// <summary>Drops any preview and repaints the configured theme.</summary>
     internal static void EndThemePreview() => PaintThemeEverywhere(Config.ResolvedTheme);

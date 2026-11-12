@@ -94,8 +94,19 @@ internal static class Jsonc
         StringBuilder sb = new();
         if (lastValueEnd < 0)
         {
-            sb.Append(text, 0, rootOpen + 1);
-            sb.Append($"\n  \"{key}\": {jsonValue}\n");
+            // No properties yet. Insert just before the closing brace (after
+            // any comments in the body), so those comments survive.
+            int insert = rootClose;
+            while (insert > rootOpen + 1 && text[insert - 1] is ' ' or '\t')
+            {
+                insert--;
+            }
+
+            string body = text[(rootOpen + 1)..insert];
+            bool needsNewline = body.Length > 0 && !body.EndsWith('\n');
+            sb.Append(text, 0, insert);
+            sb.Append(needsNewline || body.Length == 0 ? "\n" : string.Empty);
+            sb.Append($"  \"{key}\": {jsonValue}\n");
             sb.Append(text, rootClose, text.Length - rootClose);
             return sb.ToString();
         }

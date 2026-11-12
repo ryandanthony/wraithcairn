@@ -62,7 +62,19 @@ jobs:
 
       - name: Theme CLI (offline catalog)
         if: matrix.os == 'ubuntu-latest'
-        run: scripts/test-theme-cli.sh
+        run: |
+          scripts/test-theme-cli.sh
+          python3 scripts/test-config-edits.py
+
+      # Theme changes from outside (CLI, config.json, Ghostty config) repaint
+      # a running window: checked on screen pixels, plus menu contrast.
+      - name: Live theme repaint (pixels)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get install -y python3-pil
+          Xvfb :99 -screen 0 1200x800x24 &
+          sleep 2
+          DISPLAY_TEST=:99 scripts/test-live-theme.sh
 
       - name: Selftest (headless, run 2 - restore)
         if: matrix.os == 'ubuntu-latest'

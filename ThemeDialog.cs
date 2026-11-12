@@ -201,6 +201,7 @@ public sealed class ThemeDialog : Window
 
         Opened += async (_, _) =>
         {
+            Activate();
             _search.Focus();
             await LoadCatalogAsync();
         };

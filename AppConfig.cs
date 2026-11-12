@@ -243,7 +243,14 @@ public sealed class AppConfig
             }
 
             string text = File.Exists(AppConfigPath) ? File.ReadAllText(AppConfigPath) : "{\n}\n";
-            string value = theme is null ? "null" : JsonSerializer.Serialize(theme);
+            // Relaxed escaping keeps names readable for hand edits
+            // ("Dracula+", not "Dracula\u002B"); still valid JSON.
+            string value = theme is null
+                ? "null"
+                : JsonSerializer.Serialize(theme, new JsonSerializerOptions
+                {
+                    Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+                });
             string updated = Jsonc.SetTopLevelProperty(text, "theme", value);
             Directory.CreateDirectory(ConfigDir);
             string tmp = AppConfigPath + ".tmp";
