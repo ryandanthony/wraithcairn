@@ -13,6 +13,10 @@ All of Wraithcairn's own state lives under one config directory per OS:
 | macOS | `~/Library/Application Support/wraithcairn/` |
 | Windows | `%APPDATA%\wraithcairn\` |
 
+Set `WRAITHCAIRN_CONFIG_DIR` to use a different directory (handy for
+throwaway test runs; on macOS `XDG_CONFIG_HOME` and `$HOME` don't move
+Application Support).
+
 ## Files and Folders
 
 | Path | Contents |

@@ -19,9 +19,7 @@ zsh_bin="${ZSH_BIN:-$(command -v zsh || true)}"
 bin="${WRAITHCAIRN_BIN:-$PWD/bin/Release/net10.0/wraithcairn}"
 
 home="$(mktemp -d "${JCODE_SCRATCH_DIR:-/tmp}/wc-login-path.XXXXXX")"
-# Where wraithcairn keeps config.json/workspace.json (.NET ApplicationData).
-if [ "$(uname)" = Darwin ]; then cfgdir="$home/Library/Application Support/wraithcairn"
-else cfgdir="$home/.config/wraithcairn"; fi
+cfgdir="$home/wc-config"
 mkdir -p "$home/brew/bin" "$cfgdir"
 cat >"$home/brew/bin/wc-fake-tool" <<'EOF'
 #!/bin/sh
@@ -77,6 +75,7 @@ out="$home/out.txt"
 if command -v timeout >/dev/null; then limit=(timeout 60); else limit=(perl -e 'alarm 60; exec @ARGV'); fi
 env -i HOME="$home" USER="${USER:-user}" PATH=/usr/bin:/bin:/usr/sbin:/sbin \
   SHELL="$zsh_bin" WRAITHCAIRN_LOGIN="${WRAITHCAIRN_LOGIN:-1}" WRAITHCAIRN_NO_DESKTOP=1 \
+  WRAITHCAIRN_CONFIG_DIR="$cfgdir" \
   ${DISPLAY:+DISPLAY="$DISPLAY"} ${XAUTHORITY:+XAUTHORITY="$XAUTHORITY"} \
   ${DOTNET_ROOT:+DOTNET_ROOT="$DOTNET_ROOT"} ${FPATH:+FPATH="$FPATH"} \
   "${limit[@]}" "$bin" --dump-panes >"$out" 2>&1 || true

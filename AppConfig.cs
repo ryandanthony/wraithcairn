@@ -60,9 +60,18 @@ public sealed class AppConfig
     [JsonIgnore]
     public List<string> Sources { get; } = [];
 
-    public static string ConfigDir { get; } = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        "wraithcairn");
+    /// <summary>
+    /// ~/.config/wraithcairn (Linux), ~/Library/Application Support/wraithcairn
+    /// (macOS), %APPDATA%\wraithcairn (Windows). WRAITHCAIRN_CONFIG_DIR
+    /// overrides it, e.g. for isolated test runs (macOS ignores $HOME and
+    /// XDG_CONFIG_HOME for Application Support).
+    /// </summary>
+    public static string ConfigDir { get; } =
+        Environment.GetEnvironmentVariable("WRAITHCAIRN_CONFIG_DIR") is { Length: > 0 } overridden
+            ? Path.GetFullPath(overridden)
+            : Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "wraithcairn");
 
     public static string AppConfigPath => Path.Combine(ConfigDir, "config.json");
 

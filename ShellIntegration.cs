@@ -29,9 +29,7 @@ public static class ShellIntegration
         string ShellName,
         bool Integrated);
 
-    private static readonly string ConfigDir = Path.Combine(
-        System.Environment.GetFolderPath(System.Environment.SpecialFolder.ApplicationData),
-        "wraithcairn");
+    private static string ConfigDir => AppConfig.ConfigDir;
 
     public static LaunchSpec Resolve(string? preferredShell = null)
     {
