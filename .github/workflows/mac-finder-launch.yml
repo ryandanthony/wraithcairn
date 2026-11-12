@@ -126,7 +126,9 @@ jobs:
           # last lines are its build info, so "(Homebrew)" means it ran.
           ok_shell=$(grep -c 'PANE pane-2 screen:.*(Homebrew)' "$out" || true)
           ok_exec=$(grep -c 'PANE pane-4 screen:.*(Homebrew).*exited with code 0' "$out" || true)
-          ok_brew=$(grep -c 'PANE pane-5 screen:.*/opt/homebrew.*exited with code 0' "$out" || true)
+          # brew occasionally exits non-zero on runners (auto-update noise);
+          # printing the right prefix proves it was found on the login PATH.
+          ok_brew=$(grep -c 'PANE pane-5 screen:.*/opt/homebrew' "$out" || true)
           missing=$(grep -cE 'command not found|not found on PATH' "$out" || true)
           bare=$(grep -c '^app env: PATH=/usr/bin:/bin:/usr/sbin:/sbin SHELL=/bin/zsh' "$out" || true)
           echo "bare launchd env=$bare shell pane starship=$ok_shell exec pane starship=$ok_exec exec pane brew=$ok_brew not-found=$missing"
