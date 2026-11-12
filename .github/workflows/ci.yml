@@ -56,6 +56,8 @@ jobs:
           echo "$OUTPUT" | grep -q "SELFTEST theme_download_all=True"
           echo "$OUTPUT" | grep -q "SELFTEST theme_watch_config=True"
           echo "$OUTPUT" | grep -q "SELFTEST theme_restored=True"
+          echo "$OUTPUT" | grep -q "SELFTEST update_menu=True update_check=True"
+          echo "$OUTPUT" | grep -q "SELFTEST update_version_order=True"
 
       - name: Theme CLI (offline catalog)
         if: matrix.os == 'ubuntu-latest'

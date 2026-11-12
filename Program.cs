@@ -5,11 +5,24 @@ using Avalonia.Themes.Fluent;
 
 namespace Wraithcairn;
 
-internal static class Program
+internal static partial class Program
 {
+    private static readonly string[] CliFlags =
+    [
+        "--version", "-v", "update", "--update", "--list-themes", "--download-themes", "--set-theme",
+        "--install-desktop", "--uninstall-desktop",
+    ];
+
     [STAThread]
     public static void Main(string[] args)
     {
+        // A WinExe has no console; borrow the parent shell's for CLI commands
+        // so `wraithcairn update` etc. print in cmd / PowerShell.
+        if (OperatingSystem.IsWindows() && args.Any(CliFlags.Contains))
+        {
+            AttachParentConsole();
+        }
+
         if (args.Contains("--version") || args.Contains("-v"))
         {
             Console.WriteLine($"wraithcairn {AppInfo.Version}");
@@ -35,6 +48,15 @@ internal static class Program
             return;
         }
 
+        // `wraithcairn update [--check] [--yes]`: no Avalonia, no display.
+        if (args.Length > 0 && args[0] is "update" or "--update")
+        {
+            Environment.ExitCode = UpdateCommandAsync(args[1..]).GetAwaiter().GetResult();
+            return;
+        }
+
+        Updater.CleanupAfterUpdate();
+
         // Theme commands, no Avalonia. A running wraithcairn watches
         // config.json, so --set-theme repaints open windows right away.
         if (args.Contains("--download-themes") || args.Contains("--set-theme") || args.Contains("--list-themes"))
@@ -44,6 +66,91 @@ internal static class Program
         }
 
         BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+    }
+
+    /// <summary>
+    /// wraithcairn update           check, then download + install if newer
+    /// wraithcairn update --check   only report (exit 0 = up to date, 10 = update available)
+    /// wraithcairn update --force   reinstall even if already up to date
+    /// </summary>
+    private static async Task<int> UpdateCommandAsync(string[] args)
+    {
+        if (args.Contains("-h") || args.Contains("--help"))
+        {
+            Console.WriteLine("""
+                usage: wraithcairn update [--check] [--force]
+
+                  (no options)  download and install the latest release if it is newer
+                  --check       only check; exit code 0 = up to date, 10 = update available
+                  --force       reinstall the latest release even if already up to date
+                """);
+            return 0;
+        }
+
+        bool checkOnly = args.Contains("--check");
+        bool force = args.Contains("--force");
+        string? unknown = args.FirstOrDefault(a => a is not ("--check" or "--force"));
+        if (unknown is not null)
+        {
+            Console.Error.WriteLine($"wraithcairn update: unknown option {unknown} (try --help)");
+            return 2;
+        }
+
+        Console.WriteLine($"Current version: {AppInfo.Version} ({Updater.Platform().Rid})");
+        Console.WriteLine("Checking for the latest release\u2026");
+        Updater.UpdateCheck check = await Updater.CheckAsync();
+        if (check.Latest is not { } latest)
+        {
+            Console.Error.WriteLine($"wraithcairn update: {check.Error}");
+            return 1;
+        }
+
+        Console.WriteLine($"Latest version:  {latest.Version}");
+        if (!check.IsNewer && !force)
+        {
+            Console.WriteLine("wraithcairn is up to date.");
+            return 0;
+        }
+
+        if (check.IsDevBuild)
+        {
+            Console.WriteLine("This is a development build (0.0.0-dev).");
+        }
+        else if (check.IsNewer)
+        {
+            Console.WriteLine($"Update available: {AppInfo.Version} -> {latest.Version}");
+        }
+
+        Console.WriteLine($"Release notes:   {Updater.ReleaseNotesUrl(latest.Version)}");
+        if (checkOnly)
+        {
+            Console.WriteLine("Run `wraithcairn update` to install it.");
+            return 10;
+        }
+
+        if (Updater.CannotSelfUpdateReason() is { } reason)
+        {
+            Console.Error.WriteLine($"wraithcairn update: can't update in place: {reason}");
+            Console.Error.WriteLine(OperatingSystem.IsWindows()
+                ? "  irm https://ryandanthony.github.io/wraithcairn/install.ps1 | iex"
+                : "  curl -fsSL https://ryandanthony.github.io/wraithcairn/install | bash");
+            return 1;
+        }
+
+        try
+        {
+            Progress<string> progress = new(Console.WriteLine);
+            string installed = await Updater.InstallAsync(latest, progress);
+            await Task.Delay(50); // let queued progress lines print first
+            Console.WriteLine($"Updated to {latest.Version}: {installed}");
+            Console.WriteLine("Restart wraithcairn to use the new version (running windows keep the old one).");
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"wraithcairn update: {ex.Message}");
+            return 1;
+        }
     }
 
     private static async Task<int> ThemeCommandAsync(string[] args)
@@ -117,6 +224,26 @@ internal static class Program
         {
             Console.WriteLine($"{message} (saved to {AppConfig.AppConfigPath})");
             return 0;
+        }
+    }
+
+    [System.Runtime.InteropServices.LibraryImport("kernel32.dll")]
+    [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
+    private static partial bool AttachConsole(int processId);
+
+    private static void AttachParentConsole()
+    {
+        try
+        {
+            if (AttachConsole(-1)) // ATTACH_PARENT_PROCESS
+            {
+                Console.SetOut(new StreamWriter(Console.OpenStandardOutput()) { AutoFlush = true });
+                Console.SetError(new StreamWriter(Console.OpenStandardError()) { AutoFlush = true });
+            }
+        }
+        catch
+        {
+            // no parent console (started from Explorer); output is dropped
         }
     }
 

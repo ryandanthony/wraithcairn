@@ -95,6 +95,23 @@ jobs:
             "$HOME/.local/bin/wraithcairn" --version | grep -q "^wraithcairn $ma.$mi.$((pa - 1))"
           fi
 
+      # Self-update from the pinned previous release back to the latest.
+      # Skipped while the previous release predates `wraithcairn update`.
+      - name: wraithcairn update (previous -> latest)
+        run: |
+          set -euo pipefail
+          bin="$HOME/.local/bin/wraithcairn"
+          latest=$(awk '{print $2}' version.txt)
+          if ! "$bin" update --help >/dev/null 2>&1; then
+            echo "installed $("$bin" --version) has no update command yet; skipping"
+            exit 0
+          fi
+          rc=0; "$bin" update --check || rc=$?
+          [ "$rc" = 10 ] || { echo "expected exit 10 (update available), got $rc"; exit 1; }
+          "$bin" update
+          "$bin" --version | grep -q "^wraithcairn $latest\$"
+          "$bin" update | grep -q "up to date"
+
       - name: Bad version fails cleanly
         run: |
           if bash -s -- --version v0.0.0-nope < website/static/install; then
@@ -165,6 +182,20 @@ jobs:
             $v = & $exe --version | Select-Object -First 1
             if ($v -ne "wraithcairn $($pin.TrimStart('v'))") { throw "pin failed: $v" }
           }
+
+      - name: wraithcairn update (previous -> latest)
+        run: |
+          $exe = Join-Path $env:LOCALAPPDATA 'Programs\wraithcairn\wraithcairn.exe'
+          $installed = ((& $exe --version | Select-Object -First 1) -split ' ')[1]
+          & $exe update --help *> $null
+          if ($LASTEXITCODE -ne 0) { "wraithcairn $installed has no update command yet; skipping"; exit 0 }
+          & $exe update
+          if ($LASTEXITCODE -ne 0) { throw "update failed ($LASTEXITCODE)" }
+          $v = & $exe --version | Select-Object -First 1
+          "now: $v"
+          & $exe update --check
+          if ($LASTEXITCODE -ne 0) { throw "still not up to date after update (check exit $LASTEXITCODE)" }
+          exit 0
 
       - name: Bad version fails cleanly
         run: |

@@ -95,6 +95,12 @@ Settings layer in this order (later wins):
    `copyOnSelect`, `shell`, `restoreLayout`, `restoreScrollback`,
    `useGhosttyConfig`, `showSplash` (startup splash while the layout loads)
 
+### Updating
+
+`wraithcairn update` (or **View > Check for Updates...**) installs the
+latest GitHub release for this OS/CPU, verified against `SHA256SUMS`, in
+place. `update --check` only reports (exit 10 = update available).
+
 ### Themes
 
 **View > Themes...** lists the 800+ themes built into Ghostty, published on

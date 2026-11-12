@@ -24,7 +24,9 @@ curl -fsSL https://ryandanthony.github.io/wraithcairn/install | bash
 irm https://ryandanthony.github.io/wraithcairn/install.ps1 | iex
 ```
 
-Run the same command again to update. Both scripts pick the build for your
+To update later, run `wraithcairn update` or use **View → Check for
+Updates…** (see [Updating](#updating)); running the same command again
+works too. Both scripts pick the build for your
 OS and CPU, download it from
 [GitHub Releases](https://github.com/ryandanthony/wraithcairn/releases),
 check it against the release's `SHA256SUMS`, and install it for your user
@@ -172,3 +174,31 @@ single-file executable under `~/temp/wraithcairn-single`:
 
 Continue with the [Quick Start](/docs/getting-started/quick-start) to take
 your first look at layouts and panes.
+
+## Updating
+
+```bash
+wraithcairn update           # install the latest release if it's newer
+wraithcairn update --check   # just report; exit code 10 = update available
+wraithcairn update --force   # reinstall the latest release
+```
+
+Or open **View → Check for Updates…**: it shows your version and the
+latest one, links the release notes, and **Update Now** installs it.
+**Restart Now** then saves your layouts and reopens wraithcairn on the new
+version.
+
+Updates come from the same place as the install script: the latest
+[GitHub Release](https://github.com/ryandanthony/wraithcairn/releases), the
+build for your OS and CPU, checked against the release's `SHA256SUMS`
+before anything is replaced.
+
+| Platform | What gets replaced |
+|---|---|
+| Linux | the `wraithcairn` binary, atomically (running windows keep the old one until restarted) |
+| macOS | the whole `wraithcairn.app` bundle |
+| Windows | `wraithcairn.exe` (the running one is renamed to `.old` and removed on the next start) |
+
+Updating in place needs write access to where wraithcairn is installed.
+If it can't (for example a system-wide install, or a build you made from
+source), it says so and shows the install command to use instead.

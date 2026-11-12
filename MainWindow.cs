@@ -469,6 +469,7 @@ public sealed class MainWindow : Window
         view.Items.Add(new Separator());
         view.Items.Add(Item("Themes…", null, () => _ = ShowThemesAsync()));
         view.Items.Add(new Separator());
+        view.Items.Add(Item("Check for Updates…", null, () => _ = ShowUpdatesAsync()));
         MenuItem about = new() { Header = $"About wraithcairn {AppInfo.Version}…" };
         about.Click += async (_, _) => await AppInfo.ShowAboutAsync(this);
         view.Items.Add(about);
@@ -1388,6 +1389,7 @@ public sealed class MainWindow : Window
             SaveWorkspace();
 
             await RunThemeSelfTestAsync();
+            await RunUpdateSelfTestAsync();
         }
         _shuttingDown = true;
         foreach (MainWindow window in Windows.ToArray())
@@ -1399,6 +1401,80 @@ public sealed class MainWindow : Window
         }
 
         Close();
+    }
+
+    /// <summary>
+    /// Selftest for View > Check for Updates...: the menu item exists and
+    /// opens the dialog, which finds the latest release from a fake local
+    /// release folder (no network) and offers it to this dev build.
+    /// </summary>
+    private async Task RunUpdateSelfTestAsync()
+    {
+        string fake = Path.Combine(Path.GetTempPath(), $"wraithcairn-releases-{Environment.ProcessId}");
+        string? previous = Environment.GetEnvironmentVariable("WRAITHCAIRN_RELEASES_URL");
+        try
+        {
+            (string rid, string ext) = Updater.Platform();
+            Directory.CreateDirectory(Path.Combine(fake, "latest", "download"));
+            File.WriteAllText(Path.Combine(fake, "latest", "download", "SHA256SUMS"),
+                $"{new string('a', 64)}  wraithcairn-9.8.7-{rid}.{ext}\n{new string('b', 64)}  wraithcairn-9.8.7-other-x64.zip\n");
+            Environment.SetEnvironmentVariable("WRAITHCAIRN_RELEASES_URL", fake);
+
+            MenuItem? view = _menu?.Items.OfType<MenuItem>().FirstOrDefault(m => (string?)m.Header == "View");
+            MenuItem? item = view?.Items.OfType<MenuItem>().FirstOrDefault(m => (string?)m.Header == "Check for Updates\u2026");
+            if (item is null)
+            {
+                Console.WriteLine("SELFTEST update_menu=False (menu item missing)");
+                return;
+            }
+
+            item.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            UpdateDialog? dialog = null;
+            for (int i = 0; i < 50 && dialog is null; i++)
+            {
+                await Task.Delay(100);
+                dialog = OwnedWindows.OfType<UpdateDialog>().FirstOrDefault();
+            }
+
+            if (dialog is null)
+            {
+                Console.WriteLine("SELFTEST update_menu=False (dialog did not open)");
+                return;
+            }
+
+            await dialog.Checked.WaitAsync(TimeSpan.FromSeconds(20));
+            Updater.UpdateCheck? result = dialog.Result;
+            bool found = result?.Latest is { Version: "9.8.7" } latest && latest.Rid == rid && result.IsNewer;
+            await Task.Delay(200);
+            SnapshotControl(dialog, "/tmp/wraithcairn-selftest-update.png");
+            Console.WriteLine($"SELFTEST update_menu=True update_check={found} headline=\"{dialog.Headline}\" action=\"{dialog.PrimaryAction}\"");
+            dialog.Close();
+            await Task.Delay(100);
+
+            // Version ordering used to decide "newer".
+            bool order = Updater.CompareVersions("0.1.20", "0.1.19") > 0
+                && Updater.CompareVersions("0.2.0", "0.1.99") > 0
+                && Updater.CompareVersions("1.0.0", "1.0.0-rc1") > 0
+                && Updater.CompareVersions("0.1.19", "0.1.19") == 0
+                && Updater.CompareVersions("0.1.9", "0.1.10") < 0;
+            Console.WriteLine($"SELFTEST update_version_order={order}");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"SELFTEST update_menu=error {ex}");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("WRAITHCAIRN_RELEASES_URL", previous);
+            try
+            {
+                Directory.Delete(fake, recursive: true);
+            }
+            catch
+            {
+                // temp
+            }
+        }
     }
 
     /// <summary>
@@ -3396,6 +3472,55 @@ public sealed class MainWindow : Window
         {
             Console.Error.WriteLine($"config reload failed: {ex.Message}");
         }
+    }
+
+    private static bool s_updateOpen;
+
+    private async Task ShowUpdatesAsync()
+    {
+        if (s_updateOpen)
+        {
+            return;
+        }
+
+        s_updateOpen = true;
+        try
+        {
+            UpdateDialog dialog = new(ChromeBrush(), RestartIntoUpdate);
+            await dialog.ShowDialog(this);
+        }
+        finally
+        {
+            s_updateOpen = false;
+            ActiveTab()?.Active?.Focus();
+        }
+    }
+
+    /// <summary>
+    /// After an update: save the workspace, start the new binary with the same
+    /// arguments, and close every window. The new process restores the layout
+    /// (shells restart; with restoreScrollback on, their output comes back too).
+    /// </summary>
+    private static bool RestartIntoUpdate()
+    {
+        foreach (MainWindow window in Windows)
+        {
+            window._layoutDirty = false;
+        }
+
+        Windows.FirstOrDefault()?.SaveWorkspace();
+        if (!Updater.StartNewInstance())
+        {
+            return false;
+        }
+
+        _shuttingDown = true;
+        foreach (MainWindow window in Windows.ToArray())
+        {
+            window.Close();
+        }
+
+        return true;
     }
 
     private async Task ShowThemesAsync()
