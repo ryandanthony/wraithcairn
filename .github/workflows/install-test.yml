@@ -187,13 +187,18 @@ jobs:
         run: |
           $exe = Join-Path $env:LOCALAPPDATA 'Programs\wraithcairn\wraithcairn.exe'
           $installed = ((& $exe --version | Select-Object -First 1) -split ' ')[1]
-          & $exe update --help *> $null
-          if ($LASTEXITCODE -ne 0) { "wraithcairn $installed has no update command yet; skipping"; exit 0 }
-          & $exe update
+          # wraithcairn.exe is a GUI-subsystem app: PowerShell only waits for
+          # it (and sets $LASTEXITCODE) when its output is piped.
+          $help = & $exe update --help | Out-String
+          if ($LASTEXITCODE -ne 0 -or $help -notmatch 'usage: wraithcairn update') { "wraithcairn $installed has no update command yet; skipping"; exit 0 }
+          & $exe update --check | Out-Host
+          if ($LASTEXITCODE -ne 10) { throw "expected exit 10 (update available), got $LASTEXITCODE" }
+          & $exe update | Out-Host
           if ($LASTEXITCODE -ne 0) { throw "update failed ($LASTEXITCODE)" }
           $v = & $exe --version | Select-Object -First 1
           "now: $v"
-          & $exe update --check
+          if ($v -eq "wraithcairn $installed") { throw 'still on the old version' }
+          & $exe update --check | Out-Host
           if ($LASTEXITCODE -ne 0) { throw "still not up to date after update (check exit $LASTEXITCODE)" }
           exit 0
 

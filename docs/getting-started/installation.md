@@ -199,6 +199,11 @@ before anything is replaced.
 | macOS | the whole `wraithcairn.app` bundle |
 | Windows | `wraithcairn.exe` (the running one is renamed to `.old` and removed on the next start) |
 
+On Windows, `wraithcairn.exe` is a windowed app, so cmd and PowerShell
+return to the prompt before its output finishes. To wait for it, pipe it:
+`wraithcairn update | Out-Host` (PowerShell) or
+`start /wait wraithcairn update` (cmd).
+
 Updating in place needs write access to where wraithcairn is installed.
 If it can't (for example a system-wide install, or a build you made from
 source), it says so and shows the install command to use instead.
