@@ -28,6 +28,12 @@ on:
 permissions:
   contents: read
 
+# Every push to main cuts a release, so back-to-back pushes queue overlapping
+# runs whose "latest" shifts mid-run. Only the newest run matters.
+concurrency:
+  group: install-test
+  cancel-in-progress: true
+
 jobs:
   lint:
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
@@ -88,7 +94,11 @@ jobs:
         run: |
           set -euo pipefail
           bash < website/static/install | tee re.txt
-          grep -q "already installed; reinstalling" re.txt
+          # A newer release may have been published since the first install
+          # (every push to main releases); then this is an upgrade, not a
+          # reinstall. Both prove the installer handles an existing install.
+          grep -Eq "already installed; reinstalling|==> (Installing|Updating) wraithcairn" re.txt
+          "$HOME/.local/bin/wraithcairn" --version | tee version.txt
           latest=$(awk '{print $2}' version.txt)
           # Previous patch tag, if it exists (first release has none).
           IFS=. read -r ma mi pa <<<"$latest"

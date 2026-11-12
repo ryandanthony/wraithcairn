@@ -23,6 +23,11 @@ on:
 permissions:
   contents: read
 
+# Releases happen per push; only the newest run's verdict matters.
+concurrency:
+  group: mac-finder-launch
+  cancel-in-progress: true
+
 jobs:
   finder-launch:
     if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
