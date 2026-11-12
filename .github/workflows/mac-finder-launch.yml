@@ -1,0 +1,119 @@
+name: macOS Finder launch
+
+# The real way a Mac user starts wraithcairn: the released wraithcairn.app,
+# launched through LaunchServices (`open`, same as Finder/Dock/Spotlight), so
+# it gets launchd's environment, not a terminal's. Homebrew's PATH lives in
+# ~/.zprofile (`brew shellenv`, as the Homebrew installer sets up) and
+# ~/.zshrc runs `eval "$(starship init zsh)"`: the setup where panes used
+# to say "command not found: starship".
+#
+# Runs the release under test and, as a control, a release from before the
+# fix (v0.1.28), which must still show the bug.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release to test (e.g. v0.1.32); empty = latest"
+        required: false
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+
+permissions:
+  contents: read
+
+jobs:
+  finder-launch:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { case: release, expect: fixed }
+          - { case: v0.1.28, expect: broken }
+    name: open wraithcairn.app (${{ matrix.case }})
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Download release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${{ matrix.case }}"
+          if [ "$tag" = release ]; then
+            tag="${{ inputs.version }}"
+            [ -n "$tag" ] || tag=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName -q .tagName)
+          fi
+          echo "testing $tag"
+          gh release download "$tag" --repo "$GITHUB_REPOSITORY" --pattern '*-osx-arm64.zip' --dir dl
+          ditto -x -k dl/*.zip /Applications
+          /Applications/wraithcairn.app/Contents/MacOS/wraithcairn --version
+
+      - name: Shell setup like a Homebrew + starship user
+        run: |
+          brew install starship >/dev/null
+          # The runner's shell profile may already put brew on PATH; replace
+          # it with exactly what the Homebrew installer tells users to add.
+          echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' > ~/.zprofile
+          printf '%s\n' 'eval "$(starship init zsh)"' > ~/.zshrc
+          rm -f ~/.zshenv ~/.zlogin
+          sudo chsh -s /bin/zsh "$USER" || true
+          dscl . -read "/Users/$USER" UserShell
+          echo "launchd PATH (what Finder-launched apps get): '$(launchctl getenv PATH)'"
+
+          cfg="$HOME/Library/Application Support/wraithcairn"
+          rm -rf "$cfg"; mkdir -p "$cfg"
+          echo '{ "useGhosttyConfig": false, "showSplash": false }' > "$cfg/config.json"
+          pane() {
+            printf '{ "id": "%s", "title": null, "profileId": null, "workingDirectory": null, "transportId": "pty", "transportProfileId": null, "split": null, "startup": %s }' "$1" "$2"
+          }
+          cat > "$cfg/workspace.json" <<EOF
+          { "formatVersion": 1, "selectedWindowId": "window-1", "windows": [ {
+            "id": "window-1", "title": "t", "selectedTabId": "tab-1", "widthPixels": 1400, "heightPixels": 800,
+            "isMaximized": false, "tabsInTitleBar": false,
+            "tabs": [ { "id": "tab-1", "profileId": "default", "title": "main", "workingDirectory": null,
+              "transportId": "pty", "transportProfileId": null, "renderMode": "Default",
+              "rootPane": { "id": "pane-1", "title": null, "profileId": null, "workingDirectory": null,
+                "transportId": null, "transportProfileId": null,
+                "split": { "orientation": "Vertical", "ratio": 0.5,
+                  "firstPane": $(pane pane-2 '{ "command": "starship", "args": ["--version"], "runInShell": true }'),
+                  "secondPane": { "id": "pane-3", "title": null, "profileId": null, "workingDirectory": null,
+                    "transportId": null, "transportProfileId": null,
+                    "split": { "orientation": "Horizontal", "ratio": 0.5,
+                      "firstPane": $(pane pane-4 '{ "command": "starship", "args": ["--version"], "runInShell": false }'),
+                      "secondPane": $(pane pane-5 '{ "command": "brew", "args": ["--prefix"], "runInShell": false }') } } } } } ] } ] }
+          EOF
+
+      - name: open -a wraithcairn.app --args --dump-panes
+        run: |
+          out="$RUNNER_TEMP/dump.txt"
+          open -W -n --stdout "$out" --stderr "$out" -a /Applications/wraithcairn.app --args --dump-panes &
+          opener=$!
+          # The app's own environment, as LaunchServices gave it.
+          for i in $(seq 1 40); do
+            pid=$(pgrep -f 'wraithcairn.app/Contents/MacOS/wraithcairn' | head -1 || true)
+            [ -n "$pid" ] && break; sleep 0.5
+          done
+          [ -n "$pid" ] && ps eww -o command= -p "$pid" | tr ' ' '\n' | grep -E '^(PATH|SHELL|LANG|TERM)=' | sed 's/^/app env: /' || echo "app pid not found"
+          ( sleep 90; kill $opener 2>/dev/null ) & wait $opener || true
+          cat "$out"
+          cp "$out" "$RUNNER_TEMP/result.txt"
+
+      - name: Check (${{ matrix.expect }})
+        run: |
+          out="$RUNNER_TEMP/result.txt"
+          ok_shell=$(grep -c 'PANE pane-2 screen:.*starship [0-9]' "$out" || true)
+          ok_exec=$(grep -c 'PANE pane-4 screen:.*starship [0-9]' "$out" || true)
+          ok_brew=$(grep -c 'PANE pane-5 screen:.*/opt/homebrew' "$out" || true)
+          missing=$(grep -c 'command not found' "$out" || true)
+          echo "shell pane starship=$ok_shell exec pane starship=$ok_exec exec pane brew=$ok_brew 'command not found'=$missing"
+          if [ "${{ matrix.expect }}" = fixed ]; then
+            [ "$ok_shell" -ge 1 ] && [ "$ok_exec" -ge 1 ] && [ "$ok_brew" -ge 1 ] && [ "$missing" -eq 0 ]
+          else
+            # Control: the old release must reproduce the reported bug.
+            [ "$missing" -ge 1 ] && [ "$ok_shell" -eq 0 ]
+          fi
