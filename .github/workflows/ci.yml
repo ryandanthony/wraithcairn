@@ -45,6 +45,7 @@ jobs:
           echo "$OUTPUT" | grep -q "SELFTEST mac_ctrl_c_interrupts=True"
           echo "$OUTPUT" | grep -q "SELFTEST mac_ctrl_letters=True"
           echo "$OUTPUT" | grep -q "SELFTEST shift_digits_kitty=True"
+          echo "$OUTPUT" | grep -q "SELFTEST shift_digits_kitty_with_text=True"
           echo "$OUTPUT" | grep -q "SELFTEST context_menu_clipboard=True plain_ctrl_keys_free=True"
           echo "$OUTPUT" | grep -q "SELFTEST menu_split_left=True"
           echo "$OUTPUT" | grep -q "SELFTEST menu_split_up=True"
@@ -71,6 +72,18 @@ jobs:
           echo "$OUTPUT" | grep -q "SELFTEST phase=restored"
           echo "$OUTPUT" | grep -q "SELFTEST zoom_roundtrip=True"
           echo "$OUTPUT" | grep -q "SELFTEST header_drag_swap=True order_restored=True"
+
+      # Same keyboard checks without XKB, as under the native Wayland
+      # backend with no XWayland (WRAITHCAIRN_WAYLAND=1 sessions).
+      - name: Selftest (no XKB / Wayland key path)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          rm -f ~/.config/wraithcairn/workspace.json
+          OUTPUT=$(WRAITHCAIRN_NO_XKB=1 timeout 90 xvfb-run -a dotnet run -c Release --no-build -- --selftest 2>&1) || true
+          echo "$OUTPUT" | grep -E "SELFTEST (shift_digits|mac_ctrl_letters|ctrl_c)"
+          echo "$OUTPUT" | grep -q "SELFTEST shift_digits_kitty_with_text=True xkb=False"
+          echo "$OUTPUT" | grep -q "SELFTEST mac_ctrl_letters=True"
+          rm -f ~/.config/wraithcairn/workspace.json
 
       # Releases ship single-file executables; make sure that packaging still
       # finds libghostty-vt and can spawn a PTY.

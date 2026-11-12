@@ -1164,39 +1164,58 @@ public sealed class MainWindow : Window
                 // the program must get "!@#$%^&*()", not ESC[51;2u for "#".
                 if (XkbKeyboardLayout.Instance is not null)
                 {
-                    string shiftOut = Path.Combine(Path.GetTempPath(), $"wraithcairn-shift-{Environment.ProcessId}.txt");
-                    intPane.SendInput($"stty raw -echo; printf '\\033[>1u'; head -c 10 | od -An -tx1 > {shiftOut}; printf '\\033[<u'; stty sane\n");
-                    await Task.Delay(800);
+                    const string shiftExpected = "21 40 23 24 25 5e 26 2a 28 29"; // !@#$%^&*()
                     Key[] digits = [Key.D1, Key.D2, Key.D3, Key.D4, Key.D5, Key.D6, Key.D7, Key.D8, Key.D9, Key.D0];
                     PhysicalKey[] physical =
                     [
                         PhysicalKey.Digit1, PhysicalKey.Digit2, PhysicalKey.Digit3, PhysicalKey.Digit4, PhysicalKey.Digit5,
                         PhysicalKey.Digit6, PhysicalKey.Digit7, PhysicalKey.Digit8, PhysicalKey.Digit9, PhysicalKey.Digit0,
                     ];
-                    for (int i = 0; i < digits.Length; i++)
+
+                    // Types Shift+1..0 into `od` under the Kitty protocol and
+                    // returns the bytes the program received.
+                    async Task<string> ShiftDigitsAsync(string? keyText)
                     {
-                        intPane.RaiseEvent(new KeyEventArgs
+                        string outFile = Path.Combine(Path.GetTempPath(), $"wraithcairn-shift-{Environment.ProcessId}.txt");
+                        intPane.SendInput($"stty raw -echo; printf '\\033[>1u'; head -c 10 | od -An -tx1 > {outFile}; printf '\\033[<u'; stty sane\n");
+                        await Task.Delay(800);
+                        for (int i = 0; i < digits.Length; i++)
                         {
-                            RoutedEvent = KeyDownEvent,
-                            Key = digits[i],
-                            PhysicalKey = physical[i],
-                            KeyModifiers = KeyModifiers.Shift,
-                            Source = intPane,
-                        });
-                        await Task.Delay(30);
+                            intPane.RaiseEvent(new KeyEventArgs
+                            {
+                                RoutedEvent = KeyDownEvent,
+                                Key = digits[i],
+                                PhysicalKey = physical[i],
+                                KeySymbol = keyText?[i].ToString(),
+                                KeyModifiers = KeyModifiers.Shift,
+                                Source = intPane,
+                            });
+                            await Task.Delay(30);
+                        }
+
+                        await Task.Delay(800);
+                        string bytes = File.Exists(outFile)
+                            ? string.Join(" ", File.ReadAllText(outFile).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))
+                            : "(none)";
+                        File.Delete(outFile);
+                        return bytes;
                     }
 
-                    await Task.Delay(800);
-                    string shiftGot = File.Exists(shiftOut)
-                        ? string.Join(" ", File.ReadAllText(shiftOut).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))
-                        : "(none)";
-                    File.Delete(shiftOut);
-                    const string shiftExpected = "21 40 23 24 25 5e 26 2a 28 29"; // !@#$%^&*()
-                    Console.WriteLine($"SELFTEST shift_digits_kitty={shiftGot == shiftExpected} got={shiftGot}");
+                    // X11 shape: no key text (Avalonia can't map exclam etc.).
+                    if (XkbKeyboardLayout.HasXkb)
+                    {
+                        string shiftGot = await ShiftDigitsAsync(null);
+                        Console.WriteLine($"SELFTEST shift_digits_kitty={shiftGot == shiftExpected} got={shiftGot}");
+                    }
+
+                    // Native Wayland shape (WRAITHCAIRN_WAYLAND=1): key text is
+                    // already "!".."(". Shift must still count as consumed.
+                    string wlGot = await ShiftDigitsAsync("!@#$%^&*()");
+                    Console.WriteLine($"SELFTEST shift_digits_kitty_with_text={wlGot == shiftExpected} xkb={XkbKeyboardLayout.HasXkb} got={wlGot}");
                 }
                 else
                 {
-                    Console.WriteLine("SELFTEST shift_digits_kitty=skipped (no X11/XKB)");
+                    Console.WriteLine("SELFTEST shift_digits_kitty=skipped (not Linux)");
                 }
 
                 // Ctrl+Shift+C copies the selection; plain Ctrl+V is not paste.

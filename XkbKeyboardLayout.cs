@@ -26,7 +26,16 @@ namespace Wraithcairn;
 /// </summary>
 internal sealed partial class XkbKeyboardLayout : ITerminalKeyboardLayout
 {
-    public static XkbKeyboardLayout? Instance { get; } = OperatingSystem.IsLinux() && Xkb.Open() ? new XkbKeyboardLayout() : null;
+    /// <summary>Always set on Linux; <see cref="HasXkb"/> says whether XKB lookups work.</summary>
+    public static XkbKeyboardLayout? Instance { get; } = OperatingSystem.IsLinux() ? new XkbKeyboardLayout() : null;
+
+    /// <summary>
+    /// An X display (X11 or XWayland) is reachable for XKB lookups.
+    /// WRAITHCAIRN_NO_XKB=1 turns lookups off (tests the pure-Wayland path).
+    /// </summary>
+    public static bool HasXkb { get; } = OperatingSystem.IsLinux()
+        && Environment.GetEnvironmentVariable("WRAITHCAIRN_NO_XKB") != "1"
+        && Xkb.Open();
 
     public TerminalKeyboardLayoutInfo GetInfo(KeyEventArgs key)
     {
@@ -34,6 +43,21 @@ internal sealed partial class XkbKeyboardLayout : ITerminalKeyboardLayout
         {
             // Same as RoyalTerminal's Linux default: the event's own text.
             return new TerminalKeyboardLayoutInfo(key.KeyModifiers == KeyModifiers.None ? Scalar(key.KeySymbol) : 0u, 0);
+        }
+
+        if (!HasXkb)
+        {
+            // No XKB (pure Wayland session, no XWayland): the backend already
+            // gives the typed text. Shift alone on a character key always
+            // produces that text, so Shift is consumed (else the Kitty encoder
+            // sends ESC[51;2u for Shift+3). The unshifted codepoint is unknown.
+            uint text = Scalar(key.KeySymbol);
+            return key.KeyModifiers switch
+            {
+                KeyModifiers.None => new TerminalKeyboardLayoutInfo(text, 0),
+                KeyModifiers.Shift when text != 0 => new TerminalKeyboardLayoutInfo(0, TerminalModifiers.Shift),
+                _ => new TerminalKeyboardLayoutInfo(0, 0),
+            };
         }
 
         uint unshifted = Scalar(Xkb.Translate(keycode, KeyModifiers.None));
@@ -65,7 +89,7 @@ internal sealed partial class XkbKeyboardLayout : ITerminalKeyboardLayout
     /// </summary>
     public static void FillKeySymbol(KeyEventArgs e)
     {
-        if (Instance is null
+        if (!HasXkb
             || !string.IsNullOrEmpty(e.KeySymbol)
             || (e.KeyModifiers & (KeyModifiers.Control | KeyModifiers.Meta)) != 0
             || Xkb.KeycodeFor(e.PhysicalKey) is not { } keycode)
