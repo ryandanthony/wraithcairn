@@ -19,7 +19,10 @@ zsh_bin="${ZSH_BIN:-$(command -v zsh || true)}"
 bin="${WRAITHCAIRN_BIN:-$PWD/bin/Release/net10.0/wraithcairn}"
 
 home="$(mktemp -d "${JCODE_SCRATCH_DIR:-/tmp}/wc-login-path.XXXXXX")"
-mkdir -p "$home/brew/bin" "$home/.config/wraithcairn"
+# Where wraithcairn keeps config.json/workspace.json (.NET ApplicationData).
+if [ "$(uname)" = Darwin ]; then cfgdir="$home/Library/Application Support/wraithcairn"
+else cfgdir="$home/.config/wraithcairn"; fi
+mkdir -p "$home/brew/bin" "$cfgdir"
 cat >"$home/brew/bin/wc-fake-tool" <<'EOF'
 #!/bin/sh
 echo "FAKE_TOOL_OK:$1:ZDOTDIR=${ZDOTDIR:-unset}"
@@ -33,6 +36,9 @@ cat >"$home/.zshenv" <<EOF
 ${ZSH_MODULE_DIR:+module_path=("$ZSH_MODULE_DIR")}
 EOF
 cat >>"$home/.zshenv" <<'EOF'
+# Ubuntu's /etc/zsh/zshrc runs compinit, which stops at an "insecure
+# directories" prompt on CI runners (and eats the typed command).
+skip_global_compinit=1
 echo zshenv >>"$HOME/ran.log"
 EOF
 cat >"$home/.zprofile" <<'EOF'
@@ -46,14 +52,14 @@ cat >"$home/.zlogin" <<'EOF'
 echo zlogin >>"$HOME/ran.log"
 EOF
 
-cat >"$home/.config/wraithcairn/config.json" <<EOF
+cat >"$cfgdir/config.json" <<EOF
 { "shell": "$zsh_bin", "useGhosttyConfig": false, "showSplash": false }
 EOF
 pane() { # id, startup json or empty
   printf '{ "id": "%s", "title": null, "profileId": null, "workingDirectory": null, "transportId": "pty", "transportProfileId": null, "split": null%s }' \
     "$1" "${2:+, \"startup\": $2}"
 }
-cat >"$home/.config/wraithcairn/workspace.json" <<EOF
+cat >"$cfgdir/workspace.json" <<EOF
 { "formatVersion": 1, "selectedWindowId": "window-1", "windows": [ {
   "id": "window-1", "title": "t", "selectedTabId": "tab-1", "widthPixels": 1200, "heightPixels": 700,
   "isMaximized": false, "tabsInTitleBar": false,

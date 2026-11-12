@@ -9,7 +9,8 @@ All of Wraithcairn's own state lives under one config directory per OS:
 
 | OS | Config directory |
 |---|---|
-| Linux / macOS | `~/.config/wraithcairn/` |
+| Linux | `~/.config/wraithcairn/` (or `$XDG_CONFIG_HOME/wraithcairn/`) |
+| macOS | `~/Library/Application Support/wraithcairn/` |
 | Windows | `%APPDATA%\wraithcairn\` |
 
 ## Files and Folders
