@@ -1,8 +1,8 @@
 name: macOS Finder launch
 
-# The real way a Mac user starts wraithcairn: the released wraithcairn.app,
-# launched through LaunchServices (`open`, same as Finder/Dock/Spotlight), so
-# it gets launchd's environment, not a terminal's. Homebrew's PATH lives in
+# The real way a Mac user starts wraithcairn: the released wraithcairn.app
+# with the environment launchd gives Finder/Dock/Spotlight launches, not a
+# terminal's. Homebrew's PATH lives in
 # ~/.zprofile (`brew shellenv`, as the Homebrew installer sets up) and
 # ~/.zshrc runs `eval "$(starship init zsh)"`: the setup where panes used
 # to say "command not found: starship".
@@ -88,29 +88,50 @@ jobs:
                       "secondPane": $(pane pane-5 '{ "command": "brew", "args": ["--prefix"], "runInShell": false }') } } } } } ] } ] }
           EOF
 
-      - name: open -a wraithcairn.app --args --dump-panes
+      - name: Launch wraithcairn.app from launchd (Finder's environment)
         run: |
-          out="$RUNNER_TEMP/dump.txt"
-          open -W -n --stdout "$out" --stderr "$out" -a /Applications/wraithcairn.app --args --dump-panes &
-          opener=$!
-          # The app's own environment, as LaunchServices gave it.
-          for i in $(seq 1 40); do
-            pid=$(pgrep -f 'wraithcairn.app/Contents/MacOS/wraithcairn' | head -1 || true)
-            [ -n "$pid" ] && break; sleep 0.5
+          out="$RUNNER_TEMP/result.txt"
+          : > "$out"
+          # `open` from this step would pass the runner's own PATH/SHELL along.
+          # A LaunchAgent in the GUI session gets launchd's per-user
+          # environment instead: what Finder, the Dock and Spotlight give an
+          # app (PATH=/usr/bin:/bin:/usr/sbin:/sbin, SHELL from the user record).
+          plist="$RUNNER_TEMP/zone.ants.wc-finder-test.plist"
+          cat > "$plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>Label</key><string>zone.ants.wc-finder-test</string>
+            <key>ProgramArguments</key><array>
+              <string>/bin/sh</string><string>-c</string>
+              <string>echo "app env: PATH=\$PATH SHELL=\$SHELL LANG=\${LANG:-unset}"; exec /Applications/wraithcairn.app/Contents/MacOS/wraithcairn --dump-panes</string>
+            </array>
+            <key>StandardOutPath</key><string>$out</string>
+            <key>StandardErrorPath</key><string>$out</string>
+            <key>RunAtLoad</key><true/>
+          </dict></plist>
+          EOF
+          launchctl bootstrap "gui/$(id -u)" "$plist"
+          for i in $(seq 1 120); do
+            grep -q 'PANE pane-5 screen' "$out" 2>/dev/null && break; sleep 1
           done
-          [ -n "$pid" ] && ps eww -o command= -p "$pid" | tr ' ' '\n' | grep -E '^(PATH|SHELL|LANG|TERM)=' | sed 's/^/app env: /' || echo "app pid not found"
-          ( sleep 90; kill $opener 2>/dev/null ) & wait $opener || true
+          sleep 1
+          launchctl bootout "gui/$(id -u)/zone.ants.wc-finder-test" 2>/dev/null || true
           cat "$out"
-          cp "$out" "$RUNNER_TEMP/result.txt"
 
       - name: Check (${{ matrix.expect }})
         run: |
           out="$RUNNER_TEMP/result.txt"
-          ok_shell=$(grep -c 'PANE pane-2 screen:.*starship [0-9]' "$out" || true)
-          ok_exec=$(grep -c 'PANE pane-4 screen:.*starship [0-9]' "$out" || true)
-          ok_brew=$(grep -c 'PANE pane-5 screen:.*/opt/homebrew' "$out" || true)
-          missing=$(grep -c 'command not found' "$out" || true)
-          echo "shell pane starship=$ok_shell exec pane starship=$ok_exec exec pane brew=$ok_brew 'command not found'=$missing"
+          # The screen dump shows a pane's last 4 lines; starship --version's
+          # last lines are its build info, so "(Homebrew)" means it ran.
+          ok_shell=$(grep -c 'PANE pane-2 screen:.*(Homebrew)' "$out" || true)
+          ok_exec=$(grep -c 'PANE pane-4 screen:.*(Homebrew).*exited with code 0' "$out" || true)
+          ok_brew=$(grep -c 'PANE pane-5 screen:.*/opt/homebrew.*exited with code 0' "$out" || true)
+          missing=$(grep -cE 'command not found|not found on PATH' "$out" || true)
+          bare=$(grep -c '^app env: PATH=/usr/bin:/bin:/usr/sbin:/sbin SHELL=/bin/zsh' "$out" || true)
+          echo "bare launchd env=$bare shell pane starship=$ok_shell exec pane starship=$ok_exec exec pane brew=$ok_brew not-found=$missing"
+          # Both cases must really have been launched the way Finder does it.
+          [ "$bare" -eq 1 ] || { echo "not a Finder-style environment"; exit 1; }
           if [ "${{ matrix.expect }}" = fixed ]; then
             [ "$ok_shell" -ge 1 ] && [ "$ok_exec" -ge 1 ] && [ "$ok_brew" -ge 1 ] && [ "$missing" -eq 0 ]
           else
