@@ -230,6 +230,27 @@ jobs:
           try { & ([scriptblock]::Create((Get-Content -Raw website/static/install.ps1))) -Version v0.0.0-nope } catch { $failed = $true; "threw: $_" }
           if (-not $failed) { throw 'expected failure' }
 
+      # Control for the lock test above: v0.1.32, the last release without
+      # the sharing-violation retry, must fail under the same lock. If it
+      # passes, the lock no longer reproduces the flake and the test above
+      # proves nothing.
+      - name: Control - pre-retry updater fails under the lock
+        run: |
+          $exe = Join-Path $env:LOCALAPPDATA 'Programs\wraithcairn\wraithcairn.exe'
+          & ([scriptblock]::Create((Get-Content -Raw website/static/install.ps1))) -Version v0.1.32 | Out-Null
+          $ready = Join-Path $env:RUNNER_TEMP 'lock-ready-control'
+          $locker = Start-Process pwsh -PassThru -NoNewWindow -ArgumentList '-NoProfile', '-Command', `
+            "`$fs = [IO.File]::Open('$exe', 'Open', 'Read', 'Read'); New-Item '$ready' | Out-Null; Start-Sleep 3; `$fs.Close()"
+          while (-not (Test-Path $ready)) { Start-Sleep -Milliseconds 50 }
+          $out = & $exe update 2>&1 | Out-String
+          $rc = $LASTEXITCODE
+          $locker.WaitForExit()
+          $out
+          if ($rc -eq 0 -or $out -notmatch 'being used by another process') { throw "control did not fail as expected (exit $rc)" }
+          "control failed as expected (exit $rc)"
+          # Leave the latest installed for the uninstall step.
+          & ([scriptblock]::Create((Get-Content -Raw website/static/install.ps1))) | Out-Null
+
       - name: Uninstall
         run: |
           & ([scriptblock]::Create((Get-Content -Raw website/static/install.ps1))) -Uninstall
