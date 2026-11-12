@@ -34,19 +34,29 @@ New-Item '$ready' | Out-Null
 `$before = @('$($before -join "','")')
 `$deadline = (Get-Date).AddSeconds(180)
 `$unpacked = `$false
+`$log2 = '$tmp\lock-$id.trace'
+function T(`$m) { Add-Content `$log2 "`$((Get-Date).ToString('HH:mm:ss.fff')) `$m" }
+T 'locked'
+`$oldSeen = `$false
 while (-not `$unpacked -and (Get-Date) -lt `$deadline) {
+  if (-not `$oldSeen -and (Get-ChildItem '$(Split-Path $Exe)' -Filter '*.old' -ErrorAction SilentlyContinue)) { `$oldSeen = `$true; T 'old exe renamed (before unpack seen)' }
   foreach (`$d in Get-ChildItem '$tempRoot' -Directory -Filter 'wraithcairn-update-*' -ErrorAction SilentlyContinue) {
     if (`$before -contains `$d.FullName) { continue }
     `$fresh = Join-Path `$d.FullName 'unpacked\wraithcairn\wraithcairn.exe'
     if (Test-Path `$fresh) {
       # Still being extracted while the zip code holds it open exclusively.
-      try { `$probe = [IO.File]::Open(`$fresh, 'Open', 'Read', 'ReadWrite'); `$probe.Close(); `$unpacked = `$true } catch { }
+      try { `$probe = [IO.File]::Open(`$fresh, 'Open', 'Read', 'ReadWrite'); `$probe.Close(); `$unpacked = `$true; T "unpacked `$fresh" } catch { }
     }
   }
   Start-Sleep -Milliseconds 10
 }
-Start-Sleep -Milliseconds $([int]($HoldSeconds * 1000))
+`$until = (Get-Date).AddMilliseconds($([int]($HoldSeconds * 1000)))
+while ((Get-Date) -lt `$until) {
+  if (-not `$oldSeen -and (Get-ChildItem '$(Split-Path $Exe)' -Filter '*.old' -ErrorAction SilentlyContinue)) { `$oldSeen = `$true; T 'old exe renamed WHILE LOCKED' }
+  Start-Sleep -Milliseconds 10
+}
 `$fs.Close()
+T 'released'
 New-Item '$released' | Out-Null
 "@
 $locker = Start-Process pwsh -PassThru -NoNewWindow -ArgumentList '-NoProfile', '-Command', $lockScript
@@ -69,6 +79,8 @@ $elapsed = $sw.Elapsed.TotalSeconds
 $locker.WaitForExit()
 $out = (Get-Content -Raw $log) + (Get-Content -Raw $err)
 $out
+"lock trace:"; Get-Content "$tmp\lock-$id.trace" | ForEach-Object { "  $_" }
+"update finished $($finished.ToString('HH:mm:ss.fff')); installed now: $(& $Exe --version | Select-Object -First 1)"
 $lockedDuringInstall = Test-Path $released
 # The update must still have been running when the lock went away, i.e. it
 # really ran into the lock rather than finishing first.
