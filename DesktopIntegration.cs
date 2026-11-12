@@ -47,15 +47,46 @@ public static class DesktopIntegration
     /// <summary>Marks entries we wrote, so we only ever overwrite our own file.</summary>
     private const string GeneratedMarker = "X-Wraithcairn-Generated=true";
 
+    /// <summary>The binary the existing entry launches (Exec= without quotes/args).</summary>
+    private static string? CurrentTarget()
+    {
+        try
+        {
+            string? exec = File.ReadLines(DesktopFilePath)
+                .FirstOrDefault(line => line.StartsWith("Exec=", StringComparison.Ordinal))?["Exec=".Length..].Trim();
+            if (string.IsNullOrEmpty(exec))
+            {
+                return null;
+            }
+
+            return exec.StartsWith('"') && exec.IndexOf('"', 1) is var end and > 0
+                ? exec[1..end]
+                : exec.Split(' ')[0];
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     /// <summary>
     /// On launch: create the entry if missing, or repoint it if it is ours and
-    /// the binary moved. A hand-written or packaged entry is left alone.
+    /// the binary it launches is gone (moved/reinstalled elsewhere). A copy
+    /// run from somewhere else (an unpacked tarball, a test build) leaves a
+    /// working entry alone. A hand-written or packaged entry is never touched.
+    /// WRAITHCAIRN_NO_DESKTOP=1 skips this entirely.
     /// </summary>
     public static void EnsureRegistered()
     {
-        if (!IsSupported || ExecutablePath is null || IsInstalledForThisBinary())
+        if (!IsSupported || ExecutablePath is null || IsInstalledForThisBinary()
+            || Environment.GetEnvironmentVariable("WRAITHCAIRN_NO_DESKTOP") == "1")
         {
             return;
+        }
+
+        if (File.Exists(DesktopFilePath) && CurrentTarget() is { } target && File.Exists(target))
+        {
+            return; // points at another, still-present wraithcairn
         }
 
         bool ours = !File.Exists(DesktopFilePath)

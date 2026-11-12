@@ -15,7 +15,7 @@ mkdir -p "$work/wraithcairn"
 out="$work/od.txt"
 printf '{ "restoreLayout": false, "showSplash": false, "useGhosttyConfig": false }\n' >"$work/wraithcairn/config.json"
 
-DISPLAY="$display" XDG_CONFIG_HOME="$work" WRAITHCAIRN_TRACE="${WRAITHCAIRN_TRACE:-0}" \
+DISPLAY="$display" XDG_CONFIG_HOME="$work" WRAITHCAIRN_NO_DESKTOP=1 WRAITHCAIRN_TRACE="${WRAITHCAIRN_TRACE:-0}" \
   bin/Release/net10.0/wraithcairn >"$work/app.log" 2>&1 &
 app=$!
 trap 'kill $app 2>/dev/null || true' EXIT

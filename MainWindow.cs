@@ -282,6 +282,10 @@ public sealed class MainWindow : Window
                 {
                     await ConfigurePaneAsync();
                 }
+                else if (_isPrimary && Environment.GetCommandLineArgs().Contains("--check-updates"))
+                {
+                    await ShowUpdatesAsync();
+                }
             }
             catch (Exception ex)
             {

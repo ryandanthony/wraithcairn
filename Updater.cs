@@ -572,7 +572,9 @@ public static class Updater
         try
         {
             ProcessStartInfo psi = new(exe) { UseShellExecute = false };
-            foreach (string arg in Environment.GetCommandLineArgs().Skip(1))
+            // One-shot startup actions must not repeat in the new process.
+            string[] oneShot = ["--check-updates", "--configure-pane", "--selftest", "--dump-panes"];
+            foreach (string arg in Environment.GetCommandLineArgs().Skip(1).Where(a => !oneShot.Contains(a)))
             {
                 psi.ArgumentList.Add(arg);
             }
