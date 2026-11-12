@@ -108,8 +108,16 @@ jobs:
             echo "installed $("$bin" --version) has no update command yet; skipping"
             exit 0
           fi
-          rc=0; "$bin" update --check || rc=$?
-          [ "$rc" = 10 ] || { echo "expected exit 10 (update available), got $rc"; exit 1; }
+          rc=0
+          for i in $(seq 1 12); do
+            rc=0; out=$("$bin" update --check 2>&1) || rc=$?
+            echo "$out"
+            if [ "$rc" = 10 ]; then break; fi
+            if [ "$rc" != 0 ]; then echo "unexpected exit $rc from update --check"; exit 1; fi
+            echo "update not yet available (releases/latest redirect may be lagging); retrying ($i/12)"
+            sleep 10
+          done
+          [ "$rc" = 10 ] || { echo "expected exit 10 (update available), got $rc after retries"; exit 1; }
           "$bin" update
           "$bin" --version | grep -q "^wraithcairn $latest\$"
           "$bin" update | grep -q "up to date"
@@ -193,13 +201,21 @@ jobs:
           # it (and sets $LASTEXITCODE) when its output is piped.
           $help = & $exe update --help | Out-String
           if ($LASTEXITCODE -ne 0 -or $help -notmatch 'usage: wraithcairn update') { "wraithcairn $installed has no update command yet; skipping"; exit 0 }
-          & $exe update --check | Out-Host
-          if ($LASTEXITCODE -ne 10) { throw "expected exit 10 (update available), got $LASTEXITCODE" }
+          $rc = 0
+          for ($i = 1; $i -le 12; $i++) {
+            & $exe update --check | Out-Host
+            $rc = $LASTEXITCODE
+            if ($rc -eq 10) { break }
+            if ($rc -ne 0) { throw "unexpected exit $rc from update --check" }
+            "update not yet available (releases/latest redirect may be lagging); retrying ($i/12)"
+            Start-Sleep -Seconds 10
+          }
+          if ($rc -ne 10) { throw "expected exit 10 (update available), got $rc after retries" }
           # Reproduce the flake seen on win-arm64 ("being used by another
           # process"): hold the exe open without FILE_SHARE_DELETE until 2s
           # into the install step. Releases from v0.1.33 retry for ~5s.
           $ma, $mi, $pa = $installed -split '\.'
-          if (([int]$ma -gt 0) -or ([int]$mi -gt 1) -or ([int]$pa -ge 33)) {
+          if (([int]$ma -gt 0) -or ([int]$mi -gt 1) -or ([int]$pa -ge 32)) {
             & ./scripts/windows-update-lock-test.ps1 -Exe $exe -HoldSeconds 2
           } else {
             "wraithcairn $installed predates the retry; updating without the lock"
@@ -219,14 +235,14 @@ jobs:
           try { & ([scriptblock]::Create((Get-Content -Raw website/static/install.ps1))) -Version v0.0.0-nope } catch { $failed = $true; "threw: $_" }
           if (-not $failed) { throw 'expected failure' }
 
-      # Control for the lock test above: v0.1.32, the last release without
+      # Control for the lock test above: v0.1.31, the last release without
       # the sharing-violation retry, must fail under the same lock. If it
       # passes, the lock no longer reproduces the flake and the test above
       # proves nothing.
       - name: Control - pre-retry updater fails under the lock
         run: |
           $exe = Join-Path $env:LOCALAPPDATA 'Programs\wraithcairn\wraithcairn.exe'
-          & ([scriptblock]::Create((Get-Content -Raw website/static/install.ps1))) -Version v0.1.32 | Out-Null
+          & ([scriptblock]::Create((Get-Content -Raw website/static/install.ps1))) -Version v0.1.31 | Out-Null
           & ./scripts/windows-update-lock-test.ps1 -Exe $exe -HoldSeconds 2 -ExpectFail
           # Leave the latest installed for the uninstall step.
           & ([scriptblock]::Create((Get-Content -Raw website/static/install.ps1))) | Out-Null
