@@ -91,6 +91,8 @@ jobs:
           fi
 
       - name: Reinstall, then pin the previous release
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           bash < website/static/install | tee re.txt
@@ -100,11 +102,13 @@ jobs:
           grep -Eq "already installed; reinstalling|==> (Installing|Updating) wraithcairn" re.txt
           "$HOME/.local/bin/wraithcairn" --version | tee version.txt
           latest=$(awk '{print $2}' version.txt)
-          # Previous patch tag, if it exists (first release has none).
-          IFS=. read -r ma mi pa <<<"$latest"
-          if [ "$pa" -gt 0 ]; then
-            bash -s -- --version "v$ma.$mi.$((pa - 1))" < website/static/install
-            "$HOME/.local/bin/wraithcairn" --version | grep -q "^wraithcairn $ma.$mi.$((pa - 1))"
+          # The release before it, from the real tag list: minor bumps
+          # reset the patch (v0.1.45 -> v0.2.7), so patch-1 may not exist.
+          prev=$(gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --exclude-pre-releases -L 100 --json tagName -q '.[].tagName' \
+            | sed 's/^v//' | sort -t. -k1,1n -k2,2n -k3,3n | awk -v l="$latest" '$0 == l { print p; exit } { p = $0 }')
+          if [ -n "$prev" ]; then
+            bash -s -- --version "v$prev" < website/static/install
+            "$HOME/.local/bin/wraithcairn" --version | grep -q "^wraithcairn $prev"
           fi
 
       # Self-update from the pinned previous release back to the latest.
@@ -192,12 +196,18 @@ jobs:
           if ($LASTEXITCODE) { throw "Windows PowerShell 5.1 install failed ($LASTEXITCODE)" }
 
       - name: Pinned version via scriptblock parameters
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           $exe = Join-Path $env:LOCALAPPDATA 'Programs\wraithcairn\wraithcairn.exe'
           $latest = ((& $exe --version | Select-Object -First 1) -split ' ')[1]
-          $ma, $mi, $pa = $latest -split '\.'
-          if ([int]$pa -gt 0) {
-            $pin = "v$ma.$mi.$([int]$pa - 1)"
+          # The release before it, from the real tag list (minor bumps reset
+          # the patch, so patch-1 may not exist).
+          $tags = gh release list --repo $env:GITHUB_REPOSITORY --exclude-drafts --exclude-pre-releases -L 100 --json tagName -q '.[].tagName'
+          $sorted = @($tags | ForEach-Object { [version]$_.TrimStart('v') } | Sort-Object)
+          $at = [array]::IndexOf($sorted, [version]$latest)
+          if ($at -gt 0) {
+            $pin = "v$($sorted[$at - 1])"
             & ([scriptblock]::Create((Get-Content -Raw website/static/install.ps1))) -Version $pin
             $v = & $exe --version | Select-Object -First 1
             if ($v -ne "wraithcairn $($pin.TrimStart('v'))") { throw "pin failed: $v" }
