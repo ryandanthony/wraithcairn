@@ -40,6 +40,11 @@ Plain `Ctrl+C`, `Ctrl+V`, `Ctrl+X` and `Ctrl+A` are never taken by
 wraithcairn: they always go to the running program (interrupt, literal-next,
 and so on), even when text is selected.
 
+**macOS:** every `Ctrl+Shift+…` shortcut also works as `Cmd+Shift+…`
+(for example `Cmd+Shift+I` for voice input), since Command is where Mac
+keyboards put the key PC keyboards call Ctrl. `Cmd+C` / `Cmd+V` copy and
+paste.
+
 ## Mouse
 
 | Action | Effect |

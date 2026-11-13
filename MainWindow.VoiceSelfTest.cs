@@ -42,6 +42,7 @@ public sealed partial class MainWindow
             + $"env={envExpands}");
 
         await RunVoiceDownloadSelfTestAsync();
+        RunVoiceEditSelfTest();
         await RunShortcutLeakSelfTestAsync();
         await RunSplitFocusSelfTestAsync();
         string? wavFile = Environment.GetEnvironmentVariable("WRAITHCAIRN_VOICE_SELFTEST_WAV") is { Length: > 0 } w ? w
@@ -268,6 +269,10 @@ public sealed partial class MainWindow
             pane.SendInput("clear\n");
             await Task.Delay(500);
             s_voiceTyped.Clear();
+            s_voiceKeys.Clear();
+            s_voiceLiveSeen = false;
+            bool liveBefore = false;
+            static string Squash(string s) => new(s.Where(c => !char.IsWhiteSpace(c)).ToArray());
 
             KeyEventArgs press = new()
             {
@@ -284,10 +289,15 @@ public sealed partial class MainWindow
                 indicator = info.Header.VoiceText.Length > 0;
             }
 
-            // Wait for the phrase (WAV plays in real time, ~4 s).
+            // Wait for the phrase (WAV plays in real time, ~4 s). With live
+            // typing, words must reach the prompt before the phrase is done.
             for (int i = 0; i < 150 && s_voiceTyped.Count == 0; i++)
             {
                 await Task.Delay(100);
+                liveBefore |= s_voiceTyped.Count == 0 && s_voiceLiveSeen
+                    && s_voice?.Shown is { Length: > 2 } shown
+                    && TryReadScreenText(pane, out string partialScreen)
+                    && Squash(partialScreen).Contains(Squash(shown), StringComparison.Ordinal);
             }
 
             bool heard = info.Header.VoiceText.Contains('\u201c') || s_voiceTyped.Count > 0;
@@ -311,7 +321,6 @@ public sealed partial class MainWindow
             string screen = TryReadScreenText(pane, out string text) ? text : string.Empty;
             // Compare without whitespace: in a narrow window (CI's Xvfb) the
             // prompt plus phrase wraps, splitting it across screen rows.
-            static string Squash(string s) => new(s.Where(c => !char.IsWhiteSpace(c)).ToArray());
             string typedSquashed = Squash(typed);
             bool onScreen = typedSquashed.Length > 0
                 && Squash(screen).Contains(typedSquashed[..Math.Min(30, typedSquashed.Length)], StringComparison.Ordinal);
@@ -320,8 +329,13 @@ public sealed partial class MainWindow
                 && !screen.Contains("command not found", StringComparison.OrdinalIgnoreCase)
                 && !screen.Contains("Unknown command", StringComparison.OrdinalIgnoreCase);
             bool stopped = s_voice is null && info.Header.VoiceText.Length == 0;
-            Console.WriteLine($"SELFTEST voice_dictate={indicator && expected && onScreen && notRun && stopped} indicator={indicator} "
-                + $"heard={heard} on_screen={onScreen} no_enter={notRun} stopped={stopped} ended=\"{s_voiceLastEnd}\" typed=\"{typed}\"");
+            // Replaying every key voice input sent (DEL = erase one) must give
+            // exactly the finished text: corrections left nothing behind.
+            bool editsClean = ApplyEditKeys(s_voiceKeys.ToString()) == typed;
+            bool live = !Config.VoiceLiveTyping || liveBefore;
+            Console.WriteLine($"SELFTEST voice_dictate={indicator && expected && onScreen && notRun && stopped && editsClean && live} indicator={indicator} "
+                + $"heard={heard} on_screen={onScreen} no_enter={notRun} stopped={stopped} live_before_final={liveBefore} edits_clean={editsClean} "
+                + $"ended=\"{s_voiceLastEnd}\" typed=\"{typed}\"");
 
             // Leave the prompt clean for later checks.
             pane.SendInput("\u0015");
@@ -343,6 +357,49 @@ public sealed partial class MainWindow
                 // temp
             }
         }
+    }
+
+    /// <summary>What a line editor shows after these keys (DEL erases one code point).</summary>
+    private static string ApplyEditKeys(string keys)
+    {
+        System.Text.StringBuilder line = new();
+        foreach (char c in keys)
+        {
+            if (c == '\u007f')
+            {
+                if (line.Length > 0)
+                {
+                    int cut = line.Length > 1 && char.IsLowSurrogate(line[^1]) ? 2 : 1;
+                    line.Length -= cut;
+                }
+            }
+            else
+            {
+                line.Append(c);
+            }
+        }
+
+        return line.ToString();
+    }
+
+    /// <summary>Live-typing edits: revisions erase only what changed and end at the wanted text.</summary>
+    private static void RunVoiceEditSelfTest()
+    {
+        string[] steps = ["", "and so", "and so my", "and so my fellow", "and so my fellows", "and so my fellow americans", "and so", "", "caf\u00e9 \U0001F600", "caf\u00e9 \U0001F601"];
+        bool ok = true;
+        string shown = string.Empty;
+        string keys = string.Empty;
+        foreach (string step in steps)
+        {
+            keys += DictationSession.EditKeys(shown, step);
+            ok &= ApplyEditKeys(keys) == step;
+            shown = step;
+        }
+
+        bool minimal = DictationSession.EditKeys("and so my fellows", "and so my fellow americans") == "\u007f americans"
+            && DictationSession.EditKeys("abc", "abc") == string.Empty
+            && DictationSession.EditKeys("\U0001F600", "\U0001F601") == "\u007f\U0001F601";
+        Console.WriteLine($"SELFTEST voice_live_edits={ok && minimal} replay={ok} minimal={minimal}");
     }
 
     /// <summary>

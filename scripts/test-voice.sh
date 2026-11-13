@@ -68,7 +68,8 @@ if [ -n "${DISPLAY:-}" ] || command -v xvfb-run >/dev/null; then
   check "selftest voice_download" 'echo "$out" | grep -q "SELFTEST voice_download=True"'
   check "selftest voice_retry" 'echo "$out" | grep -q "SELFTEST voice_retry=True"'
   check "selftest voice_cancel" 'echo "$out" | grep -q "SELFTEST voice_cancel=True"'
-  check "selftest voice_dictate" 'echo "$out" | grep -q "SELFTEST voice_dictate=True"'
+  check "selftest voice_live_edits" 'echo "$out" | grep -q "SELFTEST voice_live_edits=True"'
+  check "selftest voice_dictate (live)" 'echo "$out" | grep -q "SELFTEST voice_dictate=True.*live_before_final=True"'
 fi
 
 exit $fail

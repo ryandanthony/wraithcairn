@@ -277,6 +277,11 @@ public sealed partial class MainWindow : Window
                 {
                     await DumpPanesAsync();
                 }
+                else if (_isPrimary && Environment.GetCommandLineArgs().Contains("--mac-key-probe"))
+                {
+                    await RunMacKeyProbeAsync();
+                    Close();
+                }
                 else if (_isPrimary && Environment.GetCommandLineArgs().Contains("--selftest"))
                 {
                     await RunSelfTestAsync();
@@ -1879,6 +1884,7 @@ public sealed partial class MainWindow : Window
         }
 
         // Mac/Windows Ctrl+letter: drop the C0 key text before the terminal sees it.
+        NoteShortcutKey(e);
         StripControlKeySymbol(e);
 
         // Linux: Shift+1..0 etc. arrive without key text; fill it from XKB.
@@ -1886,6 +1892,13 @@ public sealed partial class MainWindow : Window
 
         bool ctrlShift = e.KeyModifiers.HasFlag(KeyModifiers.Control)
             && e.KeyModifiers.HasFlag(KeyModifiers.Shift);
+        // macOS: Cmd+Shift+letter works like Ctrl+Shift+letter (Mac keyboards
+        // put Command where PC keyboards put Ctrl, and Cmd never reaches the
+        // shell anyway).
+        bool macCmdShift = OperatingSystem.IsMacOS()
+            && e.KeyModifiers.HasFlag(KeyModifiers.Meta) && e.KeyModifiers.HasFlag(KeyModifiers.Shift)
+            && !e.KeyModifiers.HasFlag(KeyModifiers.Control);
+        ctrlShift |= macCmdShift;
         bool ctrl = e.KeyModifiers.HasFlag(KeyModifiers.Control);
         bool alt = e.KeyModifiers.HasFlag(KeyModifiers.Alt);
 

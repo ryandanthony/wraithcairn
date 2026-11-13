@@ -56,6 +56,13 @@ public sealed class AppConfig
     /// <summary>Voice input turns itself off after this many seconds without speech (0 = never).</summary>
     public double VoiceIdleStopSeconds { get; set; } = 30;
 
+    /// <summary>
+    /// Type words into the pane as they are recognized, fixing them up as the
+    /// recognizer revises the phrase (default). False = type each phrase only
+    /// once it is finished.
+    /// </summary>
+    public bool VoiceLiveTyping { get; set; } = true;
+
     /// <summary>Resolved model folder (see <see cref="VoiceModelsDir"/>).</summary>
     [JsonIgnore]
     public string ResolvedVoiceModelsDir => VoiceModel.ResolveModelsDir(VoiceModelsDir);
@@ -142,6 +149,7 @@ public sealed class AppConfig
             config.VoiceModelsDir = appOverrides.VoiceModelsDir;
             config.VoiceInputDevice = appOverrides.VoiceInputDevice;
             config.VoiceIdleStopSeconds = appOverrides.VoiceIdleStopSeconds;
+            config.VoiceLiveTyping = appOverrides.VoiceLiveTyping;
             config.Sources.Add(AppConfigPath);
         }
         else if (writeDefault)
@@ -219,7 +227,9 @@ public sealed class AppConfig
                   // file; set a folder here to keep it elsewhere.
                   // "voiceModelsDir": "~/.cache/wraithcairn-models",
                   // "voiceInputDevice": "USB",
-                  "voiceIdleStopSeconds": 30
+                  "voiceIdleStopSeconds": 30,
+                  // Words appear as you speak; false = each phrase once it is finished.
+                  "voiceLiveTyping": true
                 }
 
                 """);

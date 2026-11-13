@@ -13,9 +13,12 @@ namespace Wraithcairn;
 ///
 /// The first use downloads the speech model (VoiceModelDialog: progress,
 /// automatic retries, Try Again that resumes). Then the microphone opens,
-/// the pane header shows a red mic with what is being heard, and every
-/// finished phrase (a short pause ends one) is typed into that pane as if
-/// pasted, never with Enter, so nothing runs until you press it. The same
+/// the pane header shows a red mic, and words are typed into that pane as
+/// they are recognized (voiceLiveTyping): when the recognizer revises the
+/// phrase in progress, the changed tail is backspaced and retyped, and a
+/// short pause finishes the phrase. Never with Enter, so nothing runs until
+/// you press it. With voiceLiveTyping off, each phrase is typed only once it
+/// is finished. The same
 /// shortcut stops; it also stops on its own after voiceIdleStopSeconds of
 /// silence, or when the pane closes. One pane listens at a time (there is
 /// one microphone): starting it elsewhere moves it.
@@ -28,6 +31,11 @@ public sealed partial class MainWindow
         public required TerminalControl Target { get; init; }
         public required DictationSession Session { get; init; }
         public bool TypedAny { get; set; }
+
+        /// <summary>Text typed for the phrase still in progress (live typing), separator included.</summary>
+        public string Shown { get; set; } = string.Empty;
+
+        public bool Live { get; init; }
         public string? StopReason { get; set; }
     }
 
@@ -36,6 +44,12 @@ public sealed partial class MainWindow
 
     /// <summary>Everything typed by voice input (selftest).</summary>
     private static readonly List<string> s_voiceTyped = [];
+
+    /// <summary>Every key sequence voice input sent, edits included (selftest).</summary>
+    private static readonly System.Text.StringBuilder s_voiceKeys = new();
+
+    /// <summary>Words reached the pane before their phrase was finished (selftest).</summary>
+    private static bool s_voiceLiveSeen;
 
     /// <summary>Last reason a dictation ended (selftest / status).</summary>
     private static string? s_voiceLastEnd;
@@ -46,6 +60,7 @@ public sealed partial class MainWindow
     private async Task ToggleVoiceInputAsync(TerminalControl? target = null)
     {
         target ??= ActiveTab()?.Active;
+        s_voiceToggles++;
         if (target is null || s_voiceStarting)
         {
             return;
@@ -108,7 +123,7 @@ public sealed partial class MainWindow
         Task<SherpaOnnx.OnlineRecognizer> recognizer = VoiceEngine.GetAsync(model, model.DirIn(modelsDir));
         TimeSpan idle = Config.VoiceIdleStopSeconds > 0 ? TimeSpan.FromSeconds(Config.VoiceIdleStopSeconds) : TimeSpan.Zero;
         DictationSession session = new(source, recognizer, idle);
-        VoiceState state = new() { Owner = this, Target = target, Session = session };
+        VoiceState state = new() { Owner = this, Target = target, Session = session, Live = Config.VoiceLiveTyping };
         s_voice = state;
 
         info.Header.SetVoice(recognizer.IsCompletedSuccessfully ? "listening\u2026" : "loading speech model\u2026");
@@ -127,6 +142,11 @@ public sealed partial class MainWindow
             if (ReferenceEquals(s_voice, state) && session.Ready)
             {
                 info.Header.SetVoice(text.Length == 0 ? "listening\u2026" : $"\u201c{Shorten(text, 48)}\u201d");
+            }
+
+            if (state.Live)
+            {
+                s_voiceLiveSeen |= ShowDictated(state, text) && text.Length > 0;
             }
         });
         session.Final += text => Dispatcher.UIThread.Post(() => TypeDictated(state, text));
@@ -158,20 +178,44 @@ public sealed partial class MainWindow
         session.Start();
     }
 
-    /// <summary>Types one recognized phrase into the dictation's pane (no Enter).</summary>
+    /// <summary>Finishes one recognized phrase in the dictation's pane (no Enter).</summary>
     private static void TypeDictated(VoiceState state, string text)
     {
-        string clean = DictationSession.Sanitize(text);
-        if (clean.Length == 0 || state.Target.Parent is null)
+        ShowDictated(state, text);
+        if (state.Shown.Length > 0)
         {
-            return;
+            s_voiceTyped.Add(state.Shown);
+            state.TypedAny = true;
         }
 
+        state.Shown = string.Empty;
+    }
+
+    /// <summary>
+    /// Makes the pane show <paramref name="text"/> as the phrase in progress:
+    /// keeps what already matches, backspaces the rest and types the new
+    /// tail. Empty text takes the phrase back off the line.
+    /// </summary>
+    private static bool ShowDictated(VoiceState state, string text)
+    {
+        if (state.Target.Parent is null)
+        {
+            return false;
+        }
+
+        string clean = DictationSession.Sanitize(text);
         // Phrases after the first are separated by a space.
-        string typed = (state.TypedAny ? " " : string.Empty) + clean;
-        state.TypedAny = true;
-        state.Target.SendInput(typed);
-        s_voiceTyped.Add(typed);
+        string wanted = clean.Length == 0 ? string.Empty : (state.TypedAny ? " " : string.Empty) + clean;
+        string edit = DictationSession.EditKeys(state.Shown, wanted);
+        state.Shown = wanted;
+        if (edit.Length == 0)
+        {
+            return false;
+        }
+
+        state.Target.SendInput(edit);
+        s_voiceKeys.Append(edit);
+        return true;
     }
 
     /// <summary>Stops the current dictation (any pane, any window). Null reason = quiet.</summary>

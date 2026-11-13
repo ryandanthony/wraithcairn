@@ -344,6 +344,38 @@ public sealed class DictationSession : IDisposable
     }
 
     /// <summary>
+    /// Keys that turn <paramref name="shown"/> (already typed at the cursor)
+    /// into <paramref name="wanted"/>: one DEL (what Backspace sends) per
+    /// character after the common prefix, then the new tail. Counts
+    /// characters as code points, the way a shell's line editor deletes.
+    /// </summary>
+    public static string EditKeys(string shown, string wanted)
+    {
+        int common = 0;
+        while (common < shown.Length && common < wanted.Length && shown[common] == wanted[common])
+        {
+            common++;
+        }
+
+        // Never split a surrogate pair.
+        if (common > 0 && char.IsHighSurrogate(shown[common - 1]))
+        {
+            common--;
+        }
+
+        int erase = 0;
+        for (int i = common; i < shown.Length; i++)
+        {
+            if (!char.IsLowSurrogate(shown[i]))
+            {
+                erase++;
+            }
+        }
+
+        return new string('\u007f', erase) + wanted[common..];
+    }
+
+    /// <summary>
     /// Makes recognized text safe to type into a terminal: no control
     /// characters (so nothing can press Enter or send escape sequences),
     /// whitespace collapsed.

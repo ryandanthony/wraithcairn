@@ -94,7 +94,8 @@ Settings layer in this order (later wins):
 3. `~/.config/wraithcairn/config.json`: `fontFamily`, `fontSize`, `theme`,
    `copyOnSelect`, `shell`, `restoreLayout`, `restoreScrollback`,
    `useGhosttyConfig`, `showSplash` (startup splash while the layout loads),
-   `voiceModelsDir`, `voiceInputDevice`, `voiceIdleStopSeconds`
+   `voiceModelsDir`, `voiceInputDevice`, `voiceIdleStopSeconds`,
+   `voiceLiveTyping`
 
 ### Voice input
 
@@ -104,7 +105,9 @@ streaming recognition plus OpenAL Soft for the microphone, on Linux, macOS
 and Windows. The first use downloads the speech model (Kroko English, ~71
 MB, SHA-256 pinned) with a progress bar, automatic resume/retry and Try
 Again, into `models/` next to `config.json` (`voiceModelsDir` moves it).
-Each phrase is typed when you pause, never with Enter. Headless:
+Words are typed as you speak (corrected in place as the phrase firms up;
+`voiceLiveTyping: false` types each phrase when you pause), never with
+Enter. Headless:
 `wraithcairn voice --status | --download | --devices | --transcribe F.wav
 | --listen`. See `docs/guides/voice-input.md`.
 
@@ -166,6 +169,8 @@ Saved 5 s after layout changes, on window close, and on exit/SIGTERM/SIGINT.
 | `Ctrl+PgUp` / `Ctrl+PgDn` | Previous / next layout |
 | `Alt+1..9` | Switch to layout N |
 | `Ctrl+=` / `Ctrl+-` | Bigger / smaller text |
+
+On macOS every `Ctrl+Shift+…` shortcut also works as `Cmd+Shift+…`.
 
 All of these are also in the menu bar (Shell, Edit, Layouts, View, Pane, Help).
 

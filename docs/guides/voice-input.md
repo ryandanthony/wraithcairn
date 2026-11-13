@@ -6,7 +6,8 @@ title: Voice Input
 # Voice Input
 
 Press **`Ctrl+Shift+I`** in a pane and talk. What you say is typed into
-that pane, one phrase at a time. Press **`Ctrl+Shift+I`** again to stop.
+that pane as you say it. Press **`Ctrl+Shift+I`** again to stop. On macOS
+**`Cmd+Shift+I`** works too.
 
 It also lives in **Pane → Voice Input** and in the pane's right-click menu.
 
@@ -71,8 +72,14 @@ existing model folder there, it is used as is. `wraithcairn voice
 ## While Dictating
 
 - The pane header shows a red **🎤** plus what it is hearing right now.
-- A short pause ends a phrase, and the phrase is **typed into the pane**.
-  Phrases after the first are separated by a space.
+- Words are **typed into the pane as you speak**. While a phrase is in
+  progress the recognizer may change its mind about the last word or two.
+  When it does, only the changed part is erased and retyped, so what you
+  see always matches the best guess so far. A short pause finishes the
+  phrase. Phrases after the first are separated by a space.
+- Don't type into the pane while a phrase is in progress: the corrections
+  backspace from the cursor. Set `"voiceLiveTyping": false` if you would
+  rather have each phrase typed in one go when you pause.
 - It **never presses Enter**. Control characters are removed, so dictated
   text can't run a command or send escape sequences. Read it, fix it, and
   press Enter yourself.
@@ -116,6 +123,7 @@ Microphone**. **Windows** has the same switch under **Settings → Privacy
 | `voiceModelsDir` | `models` next to `config.json` | Where the speech model is downloaded and loaded from. |
 | `voiceInputDevice` | system default | Microphone name, or part of one (see `voice --devices`). |
 | `voiceIdleStopSeconds` | `30` | Stop listening after this many seconds without speech. `0` = never. |
+| `voiceLiveTyping` | `true` | Type words as they are recognized. `false` = type each phrase only when you pause. |
 
 ## Command Line
 

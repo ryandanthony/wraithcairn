@@ -110,6 +110,28 @@ jobs:
           echo "$text" | grep -qi "what your country can do for you"
           WRAITHCAIRN_CONFIG_DIR="$RUNNER_TEMP/voice-cfg" "$exe" voice --devices || true
 
+      # Window shortcuts on macOS from real key events: NSEvents through
+      # [NSApp sendEvent:] and CGEvents through the window server (like a
+      # physical keyboard), Ctrl+Shift and the Cmd+Shift alias. Ctrl+Shift+I
+      # then dictates the WAV into the pane from inside the signed .app.
+      - name: Shortcuts from real key events (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          export WRAITHCAIRN_CONFIG_DIR="$RUNNER_TEMP/voice-cfg"
+          echo '{ "useGhosttyConfig": false, "showSplash": false }' > "$WRAITHCAIRN_CONFIG_DIR/config.json"
+          exe="$RUNNER_TEMP/app/wraithcairn.app/Contents/MacOS/wraithcairn"
+          WRAITHCAIRN_VOICE_TEST_WAV="$RUNNER_TEMP/jfk.wav" "$exe" --mac-key-probe > "$RUNNER_TEMP/probe.txt" 2>&1 &
+          pid=$!
+          for i in $(seq 1 180); do kill -0 $pid 2>/dev/null || break; sleep 1; done
+          kill $pid 2>/dev/null || true
+          grep "^PROBE" "$RUNNER_TEMP/probe.txt"
+          grep -q "^PROBE window=.* key_window=True focus=TerminalControl" "$RUNNER_TEMP/probe.txt"
+          grep -q "^PROBE ctrl+shift+i .*voice_toggled=True" "$RUNNER_TEMP/probe.txt"
+          grep -q "^PROBE cmd+shift+i .*voice_toggled=True" "$RUNNER_TEMP/probe.txt"
+          for how in pid hid hid-cmd; do
+            grep -q "^PROBE cg-$how shift+i .*listening=True dictated=True stopped=True" "$RUNNER_TEMP/probe.txt"
+          done
+
       - name: Theme CLI (offline catalog)
         if: matrix.os == 'ubuntu-latest'
         run: |
