@@ -2595,9 +2595,25 @@ public sealed partial class MainWindow : Window
         }
 
         await StartSessionAsync(newControl, cwd);
-        newControl.Focus();
+        FocusSoon(newControl);
         UpdateStatus(tab);
         MarkLayoutDirty();
+    }
+
+    /// <summary>
+    /// Focuses a pane that was just (re)parented. Moving visuals around
+    /// clears keyboard focus, and Focus() on a control that has not been laid
+    /// out in its new place yet returns false, which left keys going to the
+    /// window (the menu) after a split. Retry after the next layout pass.
+    /// </summary>
+    private void FocusSoon(TerminalControl control)
+    {
+        if (control.Focus())
+        {
+            return;
+        }
+
+        Dispatcher.UIThread.Post(() => control.Focus(), DispatcherPriority.Loaded);
     }
 
     private void ClosePane(TerminalControl? target = null)
@@ -2654,7 +2670,10 @@ public sealed partial class MainWindow : Window
         }
 
         tab.Active = TerminalPaneLayout.CollectLeafControls(tab.Root).FirstOrDefault();
-        tab.Active?.Focus();
+        if (tab.Active is { } survivor)
+        {
+            FocusSoon(survivor);
+        }
         UpdateStatus(tab);
         MarkLayoutDirty();
     }
@@ -2908,7 +2927,10 @@ public sealed partial class MainWindow : Window
             UpdateStatus(tab);
         }
 
-        source?.Focus();
+        if (source is not null)
+        {
+            FocusSoon(source);
+        }
     }
 
     private void CancelPaneDrag()
@@ -3056,7 +3078,10 @@ public sealed partial class MainWindow : Window
                 Math.Min(zoom.ChildIndex, zoom.ParentGrid.Children.Count), zoom.Leaf.Visual);
             tab.Host.Child = tab.Root.Visual;
             tab.Zoom = null;
-            tab.Active?.Focus();
+            if (tab.Active is { } unzoomed)
+            {
+                FocusSoon(unzoomed);
+            }
             return;
         }
 
@@ -3077,7 +3102,7 @@ public sealed partial class MainWindow : Window
         };
         parentGrid.Children.Remove(leaf.Visual);
         tab.Host.Child = leaf.Visual;
-        active.Focus();
+        FocusSoon(active);
     }
 
     private void ResizeSplit(TerminalPaneDirection direction)

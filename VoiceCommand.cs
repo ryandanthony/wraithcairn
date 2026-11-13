@@ -59,7 +59,8 @@ internal static class VoiceCommand
 
             if (args.Contains("--download"))
             {
-                return await DownloadAsync(model, modelsDir) ? 0 : 1;
+                bool ok = await DownloadAsync(model, modelsDir);
+                return ok ? 0 : 1;
             }
 
             int t = Array.IndexOf(args, "--transcribe");

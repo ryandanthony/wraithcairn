@@ -32,13 +32,18 @@ public sealed partial class MainWindow
             ? env
             : real.IsInstalled(Config.ResolvedVoiceModelsDir) ? real.DirIn(Config.ResolvedVoiceModelsDir) : null;
 
+        Environment.SetEnvironmentVariable("WC_T", "q");
+        bool envExpands = VoiceModel.ExpandVariables("$WC_T/a/${WC_T}/%WC_T%/$NOPE_WC") == "q/a/q/q/$NOPE_WC";
+        Environment.SetEnvironmentVariable("WC_T", null);
         bool modelsDirDefault = Config.ResolvedVoiceModelsDir == Path.Combine(AppConfig.ConfigDir, "models");
         Console.WriteLine($"SELFTEST voice_models_dir_default={modelsDirDefault || Config.VoiceModelsDir is not null} "
             + $"relative={VoiceModel.ResolveModelsDir("m") == Path.Combine(AppConfig.ConfigDir, "m")} "
-            + $"home={VoiceModel.ResolveModelsDir("~/x") == Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "x")}");
+            + $"home={VoiceModel.ResolveModelsDir("~/x") == Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "x")} "
+            + $"env={envExpands}");
 
         await RunVoiceDownloadSelfTestAsync();
         await RunShortcutLeakSelfTestAsync();
+        await RunSplitFocusSelfTestAsync();
         string? wavFile = Environment.GetEnvironmentVariable("WRAITHCAIRN_VOICE_SELFTEST_WAV") is { Length: > 0 } w ? w
             : source is not null && Directory.Exists(Path.Combine(source, "test_wavs"))
                 ? Directory.GetFiles(Path.Combine(source, "test_wavs"), "*.wav").OrderBy(f => f).FirstOrDefault()
@@ -90,6 +95,49 @@ public sealed partial class MainWindow
         string got = File.Exists(outFile) ? File.ReadAllText(outFile) : "(none)";
         File.Delete(outFile);
         Console.WriteLine($"SELFTEST shortcut_keys_not_leaked={got == "q"} got={System.Text.Json.JsonSerializer.Serialize(got)}");
+    }
+
+    /// <summary>
+    /// After Ctrl+Shift+O / E (and zoom, close) the pane that should be
+    /// active must own keyboard focus. Focus() on a freshly reparented pane
+    /// used to return false, so typing went to the window menu instead.
+    /// </summary>
+    private async Task RunSplitFocusSelfTestAsync()
+    {
+        if (ActiveTab() is not { Active: { } start } tab)
+        {
+            Console.WriteLine("SELFTEST split_focus=skipped");
+            return;
+        }
+
+        start.Focus();
+        int before = tab.Nodes.Count;
+        start.RaiseEvent(new KeyEventArgs
+        {
+            RoutedEvent = KeyDownEvent,
+            Key = Key.O,
+            PhysicalKey = PhysicalKey.O,
+            KeyModifiers = KeyModifiers.Control | KeyModifiers.Shift,
+            Source = start,
+        });
+        for (int i = 0; i < 40 && tab.Nodes.Count == before; i++)
+        {
+            await Task.Delay(100);
+        }
+
+        await Task.Delay(400);
+        object? focused = FocusManager?.GetFocusedElement();
+        bool newPaneFocused = focused is TerminalControl t && !ReferenceEquals(t, start) && tab.Nodes.ContainsKey(t);
+
+        // Close it again: focus must land back on a remaining pane.
+        if (focused is TerminalControl created)
+        {
+            ClosePane(created);
+        }
+
+        await Task.Delay(400);
+        bool afterClose = FocusManager?.GetFocusedElement() is TerminalControl survivor && tab.Nodes.ContainsKey(survivor);
+        Console.WriteLine($"SELFTEST split_focus={newPaneFocused && afterClose} new_pane={newPaneFocused} after_close={afterClose}");
     }
 
     /// <summary>Small fake model (three files with known hashes) served over local HTTP.</summary>

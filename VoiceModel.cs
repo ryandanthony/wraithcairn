@@ -77,9 +77,22 @@ public sealed class VoiceModel
             path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), path.Length > 2 ? path[2..] : string.Empty);
         }
 
-        path = Environment.ExpandEnvironmentVariables(path);
+        path = ExpandVariables(path);
         // Relative paths are relative to the config folder, like the default.
         return Path.GetFullPath(Path.IsPathRooted(path) ? path : Path.Combine(AppConfig.ConfigDir, path));
+    }
+
+    /// <summary>
+    /// Expands %VAR% (all OSes, .NET's rule) plus $VAR and ${VAR} (shell
+    /// style). Unknown variables are left as written.
+    /// </summary>
+    internal static string ExpandVariables(string path)
+    {
+        path = Environment.ExpandEnvironmentVariables(path);
+        return System.Text.RegularExpressions.Regex.Replace(
+            path,
+            @"\$\{(?<n>[A-Za-z_][A-Za-z0-9_]*)\}|\$(?<n>[A-Za-z_][A-Za-z0-9_]*)",
+            m => Environment.GetEnvironmentVariable(m.Groups["n"].Value) ?? m.Value);
     }
 
     public string DirIn(string modelsDir) => Path.Combine(modelsDir, Id);
