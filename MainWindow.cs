@@ -2608,12 +2608,32 @@ public sealed partial class MainWindow : Window
     /// </summary>
     private void FocusSoon(TerminalControl control)
     {
+        if (FindTab(control) is { } owner)
+        {
+            // Mark it active now, so code that runs before the deferred
+            // focus (and the focus border) already sees the right pane.
+            owner.Active = control;
+        }
+
         if (control.Focus())
         {
             return;
         }
 
-        Dispatcher.UIThread.Post(() => control.Focus(), DispatcherPriority.Loaded);
+        Dispatcher.UIThread.Post(
+            () =>
+            {
+                // Only if it is still the pane that should have focus: the
+                // user may have switched layout or pane meanwhile, and
+                // focusing a pane in a hidden layout would make it active.
+                if (FindTab(control) is { } tab && ReferenceEquals(tab, _activeTab)
+                    && ReferenceEquals(tab.Active, control) && control.IsEffectivelyVisible
+                    && FocusManager?.GetFocusedElement() is not TerminalControl)
+                {
+                    control.Focus();
+                }
+            },
+            DispatcherPriority.Loaded);
     }
 
     private void ClosePane(TerminalControl? target = null)
