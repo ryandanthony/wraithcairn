@@ -297,7 +297,11 @@ public sealed partial class MainWindow : Window
         };
         Closing += (_, _) =>
         {
-            StopVoiceInput(null);
+            if (s_voice?.Owner == this)
+            {
+                StopVoiceInput(null);
+            }
+
             if (_shuttingDown)
             {
                 return; // final save already happened
@@ -1836,9 +1840,38 @@ public sealed partial class MainWindow : Window
     private static readonly System.Reflection.PropertyInfo? KeySymbolProperty =
         typeof(KeyEventArgs).GetProperty(nameof(KeyEventArgs.KeySymbol));
 
+    private static readonly System.Reflection.PropertyInfo? KeyProperty =
+        typeof(KeyEventArgs).GetProperty(nameof(KeyEventArgs.Key));
+
+    private static readonly System.Reflection.PropertyInfo? PhysicalKeyProperty =
+        typeof(KeyEventArgs).GetProperty(nameof(KeyEventArgs.PhysicalKey));
+
+    /// <summary>
+    /// TerminalControl encodes key-downs even when they are already handled
+    /// (its tunnel handler uses handledEventsToo), so a window shortcut such
+    /// as Ctrl+Shift+I also reached the shell as "\e[105;6u" and showed up as
+    /// "5;6u" at the prompt. Blank the key once a shortcut consumed it.
+    /// </summary>
+    private static void ConsumeShortcutKey(KeyEventArgs e)
+    {
+        KeySymbolProperty?.SetValue(e, null);
+        KeyProperty?.SetValue(e, Key.None);
+        PhysicalKeyProperty?.SetValue(e, PhysicalKey.None);
+    }
+
     private void OnControlKeyUp(object? sender, KeyEventArgs e) => StripControlKeySymbol(e);
 
     private void OnShortcut(object? sender, KeyEventArgs e)
+    {
+        bool before = e.Handled;
+        OnShortcutCore(e);
+        if (e.Handled && !before)
+        {
+            ConsumeShortcutKey(e);
+        }
+    }
+
+    private void OnShortcutCore(KeyEventArgs e)
     {
         if (Environment.GetEnvironmentVariable("WRAITHCAIRN_TRACE") == "1")
         {

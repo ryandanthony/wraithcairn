@@ -38,6 +38,7 @@ public sealed partial class MainWindow
             + $"home={VoiceModel.ResolveModelsDir("~/x") == Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "x")}");
 
         await RunVoiceDownloadSelfTestAsync();
+        await RunShortcutLeakSelfTestAsync();
         string? wavFile = Environment.GetEnvironmentVariable("WRAITHCAIRN_VOICE_SELFTEST_WAV") is { Length: > 0 } w ? w
             : source is not null && Directory.Exists(Path.Combine(source, "test_wavs"))
                 ? Directory.GetFiles(Path.Combine(source, "test_wavs"), "*.wav").OrderBy(f => f).FirstOrDefault()
@@ -49,6 +50,46 @@ public sealed partial class MainWindow
         }
 
         await RunVoiceDictateSelfTestAsync(real, source, wavFile);
+    }
+
+    /// <summary>
+    /// Window shortcuts must not also reach the program: TerminalControl
+    /// encodes key-downs even when already handled, which used to leave
+    /// "5;6u" / "[122;6u" at the prompt after Ctrl+Shift+I / K / Z.
+    /// Captures the raw bytes a program receives while shortcuts are pressed.
+    /// </summary>
+    private async Task RunShortcutLeakSelfTestAsync()
+    {
+        if (OperatingSystem.IsWindows() || ActiveTab()?.Active is not { } pane)
+        {
+            Console.WriteLine("SELFTEST shortcut_keys_not_leaked=skipped");
+            return;
+        }
+
+        string outFile = Path.Combine(Path.GetTempPath(), $"wraithcairn-leak-{Environment.ProcessId}.txt");
+        pane.Focus();
+        pane.SendInput($"stty raw -echo; timeout 3 cat > {outFile}; stty sane\n");
+        await Task.Delay(800);
+        foreach (Key key in new[] { Key.K, Key.Z, Key.Z, Key.OemPlus })
+        {
+            pane.RaiseEvent(new KeyEventArgs
+            {
+                RoutedEvent = KeyDownEvent,
+                Key = key,
+                PhysicalKey = key == Key.OemPlus ? PhysicalKey.Equal : (PhysicalKey)Enum.Parse(typeof(PhysicalKey), key.ToString()),
+                KeySymbol = key == Key.OemPlus ? "+" : key.ToString(),
+                KeyModifiers = KeyModifiers.Control | KeyModifiers.Shift,
+                Source = pane,
+            });
+            await Task.Delay(120);
+        }
+
+        // A plain key still gets through (sanity: the capture works).
+        pane.SendInput("q");
+        await Task.Delay(3500);
+        string got = File.Exists(outFile) ? File.ReadAllText(outFile) : "(none)";
+        File.Delete(outFile);
+        Console.WriteLine($"SELFTEST shortcut_keys_not_leaked={got == "q"} got={System.Text.Json.JsonSerializer.Serialize(got)}");
     }
 
     /// <summary>Small fake model (three files with known hashes) served over local HTTP.</summary>
