@@ -90,7 +90,7 @@ actions available from the keyboard or **Pane** menu:
   layouts are switched
 
 :::tip
-The **View** menu has an **About wraithcairn...** item showing the app
+The **Help** menu has an **About wraithcairn...** item showing the app
 icon and the current version. The same version is printed by
 [`--version`](/docs/reference/command-line).
 :::

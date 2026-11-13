@@ -423,8 +423,6 @@ public sealed class MainWindow : Window
         MenuItem shell = new() { Header = "Shell" };
         shell.Items.Add(Item("New Layout", Gesture(Key.T), () => _ = NewTabAsync(null)));
         shell.Items.Add(Item("New Window", Gesture(Key.N), () => new MainWindow(null, isPrimary: false).Show()));
-        shell.Items.Add(new Separator());
-        shell.Items.Add(Item("Close Pane", Gesture(Key.W), () => ClosePane()));
 
         MenuItem pane = new() { Header = "Pane" };
         pane.Items.Add(Item("Split Right", Gesture(Key.O),
@@ -447,6 +445,8 @@ public sealed class MainWindow : Window
                 _ = RestartPaneAsync(control);
             }
         }));
+        pane.Items.Add(new Separator());
+        pane.Items.Add(Item("Close Pane", Gesture(Key.W), () => ClosePane()));
 
         MenuItem edit = new() { Header = "Edit" };
         edit.Items.Add(Item("Copy", Gesture(Key.C), () =>
@@ -474,11 +474,15 @@ public sealed class MainWindow : Window
             () => SetFontSize(_fontSize - 1)));
         view.Items.Add(new Separator());
         view.Items.Add(Item("Themes…", null, () => _ = ShowThemesAsync()));
-        view.Items.Add(new Separator());
-        view.Items.Add(Item("Check for Updates…", null, () => _ = ShowUpdatesAsync()));
+
+        MenuItem help = new() { Header = "Help" };
+        help.Items.Add(Item("Quick Start", null, () => OpenUrl(QuickStartUrl)));
+        help.Items.Add(Item("Guides", null, () => OpenUrl(GuidesUrl)));
+        help.Items.Add(new Separator());
+        help.Items.Add(Item("Check for Updates…", null, () => _ = ShowUpdatesAsync()));
         MenuItem about = new() { Header = $"About wraithcairn {AppInfo.Version}…" };
         about.Click += async (_, _) => await AppInfo.ShowAboutAsync(this);
-        view.Items.Add(about);
+        help.Items.Add(about);
 
         MenuItem layouts = new() { Header = "Layouts" };
         layouts.SubmenuOpened += (_, e) =>
@@ -495,10 +499,11 @@ public sealed class MainWindow : Window
 
         Menu menu = new() { FontSize = 12 };
         menu.Items.Add(shell);
-        menu.Items.Add(pane);
         menu.Items.Add(edit);
-        menu.Items.Add(view);
         menu.Items.Add(layouts);
+        menu.Items.Add(view);
+        menu.Items.Add(pane);
+        menu.Items.Add(help);
 
         // Clicking the menu takes keyboard focus; hand it back to the active
         // pane afterwards (unless the action opened the find bar).
@@ -515,6 +520,23 @@ public sealed class MainWindow : Window
 
         _menu = menu;
         return menu;
+    }
+
+    private const string DocsBaseUrl = "https://ryandanthony.github.io/wraithcairn/docs/";
+    private const string QuickStartUrl = DocsBaseUrl + "getting-started/quick-start";
+    private const string GuidesUrl = DocsBaseUrl + "guides";
+
+    /// <summary>Opens a URL in the user's default browser (xdg-open on Linux).</summary>
+    private void OpenUrl(string url)
+    {
+        try
+        {
+            _ = Launcher.LaunchUriAsync(new Uri(url));
+        }
+        catch
+        {
+            // No browser / launcher available; nothing useful to do.
+        }
     }
 
     // ----- layouts menu ---------------------------------------------------
@@ -1416,6 +1438,17 @@ public sealed class MainWindow : Window
             NamedLayouts.Delete(probe);
             SaveWorkspace();
 
+            // Menu bar order and the Help / Pane contents.
+            List<MenuItem> top = _menu?.Items.OfType<MenuItem>().ToList() ?? [];
+            string order = string.Join(",", top.Select(m => (string?)m.Header));
+            List<string?> Headers(string menu) => top.FirstOrDefault(m => (string?)m.Header == menu)?
+                .Items.OfType<MenuItem>().Select(m => m.Header as string).ToList() ?? [];
+            bool helpOk = Headers("Help").Take(3).SequenceEqual(new[] { "Quick Start", "Guides", "Check for Updates\u2026" })
+                && Headers("Help").Any(h => h?.StartsWith("About wraithcairn") == true);
+            bool closeInPane = Headers("Pane").Contains("Close Pane") && !Headers("Shell").Contains("Close Pane");
+            bool viewClean = !Headers("View").Any(h => h == "Check for Updates\u2026" || h?.StartsWith("About") == true);
+            Console.WriteLine($"SELFTEST menu_order={order == "Shell,Edit,Layouts,View,Pane,Help"} help_menu={helpOk} close_in_pane={closeInPane} view_clean={viewClean} ({order})");
+
             await RunThemeSelfTestAsync();
             await RunUpdateSelfTestAsync();
         }
@@ -1432,7 +1465,7 @@ public sealed class MainWindow : Window
     }
 
     /// <summary>
-    /// Selftest for View > Check for Updates...: the menu item exists and
+    /// Selftest for Help > Check for Updates...: the menu item exists and
     /// opens the dialog, which finds the latest release from a fake local
     /// release folder (no network) and offers it to this dev build.
     /// </summary>
@@ -1448,8 +1481,8 @@ public sealed class MainWindow : Window
                 $"{new string('a', 64)}  wraithcairn-9.8.7-{rid}.{ext}\n{new string('b', 64)}  wraithcairn-9.8.7-other-x64.zip\n");
             Environment.SetEnvironmentVariable("WRAITHCAIRN_RELEASES_URL", fake);
 
-            MenuItem? view = _menu?.Items.OfType<MenuItem>().FirstOrDefault(m => (string?)m.Header == "View");
-            MenuItem? item = view?.Items.OfType<MenuItem>().FirstOrDefault(m => (string?)m.Header == "Check for Updates\u2026");
+            MenuItem? help = _menu?.Items.OfType<MenuItem>().FirstOrDefault(m => (string?)m.Header == "Help");
+            MenuItem? item = help?.Items.OfType<MenuItem>().FirstOrDefault(m => (string?)m.Header == "Check for Updates\u2026");
             if (item is null)
             {
                 Console.WriteLine("SELFTEST update_menu=False (menu item missing)");

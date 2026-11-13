@@ -6,7 +6,7 @@ using Avalonia.Media;
 namespace Wraithcairn;
 
 /// <summary>
-/// View > Check for Updates...: looks up the latest GitHub release, shows
+/// Help > Check for Updates...: looks up the latest GitHub release, shows
 /// current vs latest, and (when this is an installed release build) can
 /// download, verify, and install it, then restart into it. Same engine as
 /// `wraithcairn update`.

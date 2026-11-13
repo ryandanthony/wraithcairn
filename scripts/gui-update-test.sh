@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# End-to-end test of View > Check for Updates... on an isolated X server:
+# End-to-end test of Help > Check for Updates... on an isolated X server:
 # an old single-file build opens the dialog (--check-updates), clicks
 # Update Now, then Restart Now, and we check the binary was replaced and
 # the new version came back up with the saved layout.
