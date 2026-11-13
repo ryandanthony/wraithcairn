@@ -23,6 +23,7 @@ public sealed class PaneHeader : Border
 
     private readonly TextBlock _text;
     private readonly Run _grip;
+    private readonly Run _voice;
     private readonly Run _title;
     private readonly Run _context;
     private IBrush _idleBackground = Brushes.Transparent;
@@ -52,6 +53,7 @@ public sealed class PaneHeader : Border
     public PaneHeader(Color background, Color foreground)
     {
         _grip = new Run("\u283f ");
+        _voice = new Run { FontWeight = FontWeight.SemiBold, Foreground = new SolidColorBrush(Color.Parse("#f38ba8")) };
         _title = new Run { FontWeight = FontWeight.SemiBold };
         _context = new Run();
 
@@ -63,6 +65,7 @@ public sealed class PaneHeader : Border
             VerticalAlignment = VerticalAlignment.Center,
         };
         _text.Inlines!.Add(_grip);
+        _text.Inlines.Add(_voice);
         _text.Inlines.Add(_title);
         _text.Inlines.Add(_context);
 
@@ -91,7 +94,19 @@ public sealed class PaneHeader : Border
     public string ContextText => _context.Text ?? string.Empty;
 
     /// <summary>Full single-line text, as shown.</summary>
-    public string DisplayText => $"{TitleText}{ContextText}";
+    public string DisplayText => $"{VoiceText}{TitleText}{ContextText}";
+
+    /// <summary>Voice input indicator, empty when not listening.</summary>
+    public string VoiceText => _voice.Text ?? string.Empty;
+
+    /// <summary>
+    /// Shows the voice input indicator before the title (null hides it):
+    /// a red mic plus state, e.g. "listening" or the phrase being heard.
+    /// </summary>
+    public void SetVoice(string? text)
+    {
+        _voice.Text = text is null ? string.Empty : $"\U0001F3A4 {text}   ";
+    }
 
     public bool IsDragging => _dragging;
 

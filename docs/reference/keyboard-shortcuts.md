@@ -27,6 +27,7 @@ Every shortcut below is also available from the menu bar (**Shell**,
 | `Ctrl+Shift+V` | Paste (also `Shift+Insert`) |
 | `Ctrl+Shift+F` | Find (`Enter` next, `Shift+Enter` previous, `Esc` close) |
 | `Ctrl+Shift+K` | Clear scrollback |
+| `Ctrl+Shift+I` | Voice input on/off for the active pane (offline, see [Voice Input](/docs/guides/voice-input)) |
 | `Ctrl+PgUp` | Previous layout |
 | `Ctrl+PgDn` | Next layout |
 | `Ctrl+Shift+PgUp` | Move active layout up in the list |

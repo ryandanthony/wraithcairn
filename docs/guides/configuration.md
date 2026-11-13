@@ -32,6 +32,9 @@ all).
 | `useGhosttyConfig` | boolean | `true` | Read `~/.config/ghostty/config` as a base layer at all. |
 | `showSplash` | boolean | `true` | Show a splash window at startup while the saved layout loads (status line plus a progress bar as panes start). |
 | `shell` | string or `null` | `$SHELL` | Explicit shell to launch, e.g. `"/usr/bin/fish"`. `null` uses `$SHELL`. |
+| `voiceModelsDir` | string or `null` | `models` next to `config.json` | Where [voice input](/docs/guides/voice-input) keeps its speech model. Relative paths are relative to the config folder; `~` and environment variables expand. |
+| `voiceInputDevice` | string or `null` | system default | Microphone for voice input, by name or part of one (`wraithcairn voice --devices`). |
+| `voiceIdleStopSeconds` | number | `30` | Voice input stops after this many seconds without speech. `0` = never. |
 
 All keys are optional; omit anything you want left at its default or
 inherited from the Ghostty layer.

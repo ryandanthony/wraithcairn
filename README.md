@@ -93,7 +93,20 @@ Settings layer in this order (later wins):
    copy-on-select (Ghostty themes are found by name)
 3. `~/.config/wraithcairn/config.json`: `fontFamily`, `fontSize`, `theme`,
    `copyOnSelect`, `shell`, `restoreLayout`, `restoreScrollback`,
-   `useGhosttyConfig`, `showSplash` (startup splash while the layout loads)
+   `useGhosttyConfig`, `showSplash` (startup splash while the layout loads),
+   `voiceModelsDir`, `voiceInputDevice`, `voiceIdleStopSeconds`
+
+### Voice input
+
+**Ctrl+Shift+I** (or **Pane > Voice Input**) dictates into the active pane,
+fully offline: [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)
+streaming recognition plus OpenAL Soft for the microphone, on Linux, macOS
+and Windows. The first use downloads the speech model (Kroko English, ~71
+MB, SHA-256 pinned) with a progress bar, automatic resume/retry and Try
+Again, into `models/` next to `config.json` (`voiceModelsDir` moves it).
+Each phrase is typed when you pause, never with Enter. Headless:
+`wraithcairn voice --status | --download | --devices | --transcribe F.wav
+| --listen`. See `docs/guides/voice-input.md`.
 
 ### Updating
 
@@ -126,6 +139,7 @@ Under `~/.config/wraithcairn/` (Linux/macOS) or `%APPDATA%\wraithcairn\`
 | `layouts/NAME.json` | saved layouts |
 | `config.json` | app settings |
 | `themes/` | downloaded themes (Ghostty format, one file per theme) |
+| `models/` | voice input speech model (downloaded on first use; `voiceModelsDir`) |
 | `scrollback/` | per-pane scrollback (only with `restoreScrollback`) |
 
 Saved 5 s after layout changes, on window close, and on exit/SIGTERM/SIGINT.
@@ -148,6 +162,7 @@ Saved 5 s after layout changes, on window close, and on exit/SIGTERM/SIGINT.
 | `Ctrl+Shift+C` / `Ctrl+Shift+V` | Copy selection / paste (plain `Ctrl+C` / `Ctrl+V` always go to the program) |
 | `Ctrl+Shift+F` | Find (Enter next, Shift+Enter prev, Esc close) |
 | `Ctrl+Shift+K` | Clear scrollback |
+| `Ctrl+Shift+I` | Voice input on/off for the active pane (offline) |
 | `Ctrl+PgUp` / `Ctrl+PgDn` | Previous / next layout |
 | `Alt+1..9` | Switch to layout N |
 | `Ctrl+=` / `Ctrl+-` | Bigger / smaller text |
@@ -196,3 +211,9 @@ P/Invokes it by name. The `KeepSystemNativeInSingleFile` target in
 ## License
 
 MIT
+
+Voice input bundles [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)
+and ONNX Runtime (Apache-2.0 / MIT) and loads
+[OpenAL Soft](https://github.com/kcat/openal-soft) (LGPL-2.0-or-later) as a
+separate shared library. The speech model it downloads is
+[Kroko ASR](https://huggingface.co/Banafo/Kroko-ASR) (CC-BY-SA 4.0).

@@ -16,6 +16,7 @@ title: Command Line
 | `--download-themes` | Downloads every theme to `themes/` so they all work offline. No window. |
 | `--set-theme NAME` | Downloads `NAME` if needed and saves it as `theme` in `config.json`. `--set-theme ghostty` clears it (inherit Ghostty's). Running instances repaint immediately. No window. |
 | `--check-updates` | Opens **Check for Updates…** right after launch. |
+| `voice --status` / `--download` / `--devices` / `--transcribe FILE` / `--listen [SECS]` | Voice input helpers, no window: show the model folder, download the speech model, list microphones, transcribe a WAV file or the microphone offline. See [Voice Input](/docs/guides/voice-input#command-line). |
 | `--version` / `-v` | Prints `wraithcairn <version>` and exits. |
 | `--install-desktop` | Linux: writes `~/.local/share/applications/wraithcairn.desktop` and icons pointing at this binary, so it gets its own task manager entry and appears in the launcher. Normal launches do this automatically when there is no entry yet, or when the entry's binary no longer exists; a copy run from elsewhere leaves a working entry alone. Set `WRAITHCAIRN_NO_DESKTOP=1` to skip it. |
 | `--uninstall-desktop` | Linux: removes that desktop entry and its icons. |
