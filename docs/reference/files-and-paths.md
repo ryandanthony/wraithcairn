@@ -26,6 +26,7 @@ Application Support).
 | `config.json` | App settings (see [Configuration](/docs/guides/configuration)). Watched: theme changes apply live. |
 | `themes/` | Downloaded color themes, one Ghostty-format file per theme (see [Themes](/docs/guides/themes)). |
 | `theme-catalog.json` | Cached copy of the online theme list, so the Themes dialog works offline. |
+| `models/` | The speech model for [voice input](/docs/guides/voice-input), downloaded on first use (about 71 MB). Moved with `voiceModelsDir`. |
 | `scrollback/` | Per-pane scrollback files (`{paneId}.vt`), only written when `restoreScrollback` is enabled. Scoped under a per-workspace subfolder when running with `--workspace NAME`. |
 
 ## Save Timing

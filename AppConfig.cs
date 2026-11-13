@@ -43,6 +43,23 @@ public sealed class AppConfig
     /// <summary>Optional explicit shell, e.g. "/usr/bin/fish". Null = $SHELL.</summary>
     public string? Shell { get; set; }
 
+    /// <summary>
+    /// Where voice input keeps its downloaded speech model. Null = "models"
+    /// next to config.json. Relative paths are relative to the config folder;
+    /// "~" and environment variables are expanded.
+    /// </summary>
+    public string? VoiceModelsDir { get; set; }
+
+    /// <summary>Microphone for voice input (name or part of one). Null = system default.</summary>
+    public string? VoiceInputDevice { get; set; }
+
+    /// <summary>Voice input turns itself off after this many seconds without speech (0 = never).</summary>
+    public double VoiceIdleStopSeconds { get; set; } = 30;
+
+    /// <summary>Resolved model folder (see <see cref="VoiceModelsDir"/>).</summary>
+    [JsonIgnore]
+    public string ResolvedVoiceModelsDir => VoiceModel.ResolveModelsDir(VoiceModelsDir);
+
     [JsonIgnore]
     public TerminalTheme? ResolvedTheme { get; private set; }
 
@@ -122,6 +139,9 @@ public sealed class AppConfig
             config.UseGhosttyConfig = appOverrides.UseGhosttyConfig;
             config.ShowSplash = appOverrides.ShowSplash;
             if (appOverrides.Shell is not null) config.Shell = appOverrides.Shell;
+            config.VoiceModelsDir = appOverrides.VoiceModelsDir;
+            config.VoiceInputDevice = appOverrides.VoiceInputDevice;
+            config.VoiceIdleStopSeconds = appOverrides.VoiceIdleStopSeconds;
             config.Sources.Add(AppConfigPath);
         }
         else if (writeDefault)
@@ -193,7 +213,13 @@ public sealed class AppConfig
                   "restoreScrollback": false,
                   // Splash window while the saved layout loads.
                   "showSplash": true,
-                  "useGhosttyConfig": true
+                  "useGhosttyConfig": true,
+                  // Voice input (Ctrl+Shift+I) runs offline. Its speech model
+                  // (~68 MB) downloads on first use into "models" next to this
+                  // file; set a folder here to keep it elsewhere.
+                  // "voiceModelsDir": "~/.cache/wraithcairn-models",
+                  // "voiceInputDevice": "USB",
+                  "voiceIdleStopSeconds": 30
                 }
 
                 """);

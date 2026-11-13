@@ -10,7 +10,7 @@ internal static partial class Program
     private static readonly string[] CliFlags =
     [
         "--version", "-v", "update", "--update", "--list-themes", "--download-themes", "--set-theme",
-        "--install-desktop", "--uninstall-desktop",
+        "--install-desktop", "--uninstall-desktop", "voice",
     ];
 
     [STAThread]
@@ -56,6 +56,13 @@ internal static partial class Program
         }
 
         Updater.CleanupAfterUpdate();
+
+        // `wraithcairn voice ...`: model download, devices, transcription. No display.
+        if (args.Length > 0 && args[0] == "voice")
+        {
+            Environment.ExitCode = VoiceCommand.RunAsync(args[1..]).GetAwaiter().GetResult();
+            return;
+        }
 
         // Theme commands, no Avalonia. A running wraithcairn watches
         // config.json, so --set-theme repaints open windows right away.

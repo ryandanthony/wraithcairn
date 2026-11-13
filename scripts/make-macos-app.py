@@ -86,6 +86,9 @@ with open(os.path.join(contents, "Info.plist"), "wb") as f:
         "NSHighResolutionCapable": True,
         "NSPrincipalClass": "NSApplication",
         "NSSupportsAutomaticGraphicsSwitching": True,
+        # Voice input (Ctrl+Shift+I). Without this key macOS terminates the
+        # app the moment it opens the microphone instead of asking.
+        "NSMicrophoneUsageDescription": "Voice input (Ctrl+Shift+I) turns your speech into text in a terminal pane. Recognition runs entirely on this Mac; audio never leaves it.",
     }, f)
 
 with open(os.path.join(contents, "PkgInfo"), "w") as f:

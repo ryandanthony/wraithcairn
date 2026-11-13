@@ -33,12 +33,13 @@ namespace Wraithcairn;
 ///   Ctrl+Shift+N        new window
 ///   Ctrl+Shift+P        configure pane (start folder, program, args)
 ///   Ctrl+Shift+R        restart pane
+///   Ctrl+Shift+I        voice input on/off for the active pane (offline)
 ///   Ctrl+PgUp/PgDn      previous / next layout
 ///   Alt+1..9            switch to layout N
 ///   Ctrl+Shift+PgUp/PgDn move layout up / down in the list
 ///   Ctrl+= / Ctrl+-     font size
 /// </summary>
-public sealed class MainWindow : Window
+public sealed partial class MainWindow : Window
 {
     private static readonly string WorkspacePath = NamedLayouts.ActivePath;
 
@@ -296,6 +297,7 @@ public sealed class MainWindow : Window
         };
         Closing += (_, _) =>
         {
+            StopVoiceInput(null);
             if (_shuttingDown)
             {
                 return; // final save already happened
@@ -445,6 +447,8 @@ public sealed class MainWindow : Window
                 _ = RestartPaneAsync(control);
             }
         }));
+        pane.Items.Add(new Separator());
+        pane.Items.Add(Item("Voice Input", Gesture(Key.I), () => _ = ToggleVoiceInputAsync()));
         pane.Items.Add(new Separator());
         pane.Items.Add(Item("Close Pane", Gesture(Key.W), () => ClosePane()));
 
@@ -1451,6 +1455,7 @@ public sealed class MainWindow : Window
 
             await RunThemeSelfTestAsync();
             await RunUpdateSelfTestAsync();
+            await RunVoiceSelfTestAsync();
         }
         _shuttingDown = true;
         foreach (MainWindow window in Windows.ToArray())
@@ -1866,6 +1871,7 @@ public sealed class MainWindow : Window
         else if (ctrlShift && e.Key == Key.V && ActiveTab()?.Active is { } pasteTarget) { _ = pasteTarget.PasteAsync(); e.Handled = true; }
         else if (ctrlShift && e.Key == Key.F) { OpenSearch(); e.Handled = true; }
         else if (ctrlShift && e.Key == Key.K && ActiveTab()?.Active is { } clearTarget) { clearTarget.ClearScrollback(); e.Handled = true; }
+        else if (ctrlShift && e.Key == Key.I) { _ = ToggleVoiceInputAsync(); e.Handled = true; }
         else if (ctrlShift && e.Key == Key.N) { new MainWindow(null, isPrimary: false).Show(); e.Handled = true; }
         else if (ctrlShift && e.Key is Key.OemPlus or Key.Add) { EqualizeSplits(); e.Handled = true; }
         else if (ctrlShift && e.Key == Key.PageDown) { MoveTab(1); e.Handled = true; }
@@ -2298,6 +2304,8 @@ public sealed class MainWindow : Window
         up.Click += (_, _) => { terminal.Focus(); _ = SplitAsync(TerminalPaneSplitOrientation.Vertical, newPaneFirst: true); };
         MenuItem close = new() { Header = "Close Pane" };
         close.Click += (_, _) => ClosePane(terminal);
+        MenuItem voice = new() { Header = "Voice Input", InputGesture = CtrlShift(Key.I) };
+        voice.Click += (_, _) => { terminal.Focus(); _ = ToggleVoiceInputAsync(terminal); };
 
         ContextMenu menu = new();
         menu.Items.Add(copy);
@@ -2311,12 +2319,15 @@ public sealed class MainWindow : Window
         menu.Items.Add(left);
         menu.Items.Add(up);
         menu.Items.Add(new Separator());
+        menu.Items.Add(voice);
+        menu.Items.Add(new Separator());
         menu.Items.Add(close);
 
         // Right-click focuses that pane; Copy is only useful with a selection.
         menu.Opening += (_, _) =>
         {
             copy.IsEnabled = terminal.HasSelection;
+            voice.Header = IsDictatingInto(terminal) ? "Stop Voice Input" : "Voice Input";
             terminal.Focus();
         };
         return menu;
@@ -2461,6 +2472,7 @@ public sealed class MainWindow : Window
         foreach (TerminalControl control in tab.Nodes.Keys.ToArray())
         {
             StopQuietly(control);
+            StopVoiceInputFor(control);
             _panes.Remove(control);
         }
 
@@ -2584,6 +2596,7 @@ public sealed class MainWindow : Window
         TerminalPaneNode sibling = ReferenceEquals(parent.First, node) ? parent.Second! : parent.First!;
 
         StopQuietly(control);
+        StopVoiceInputFor(control);
         tab.Nodes.Remove(control);
         _panes.Remove(control);
 

@@ -59,6 +59,33 @@ jobs:
           echo "$OUTPUT" | grep -q "SELFTEST theme_restored=True"
           echo "$OUTPUT" | grep -q "SELFTEST update_menu=True update_check=True"
           echo "$OUTPUT" | grep -q "SELFTEST update_version_order=True"
+          echo "$OUTPUT" | grep -q "SELFTEST menu_order=True help_menu=True close_in_pane=True view_clean=True"
+          echo "$OUTPUT" | grep -q "SELFTEST voice_download=True retried=True resumed=True"
+          echo "$OUTPUT" | grep -q "SELFTEST voice_retry=True try_again_offered=True"
+          echo "$OUTPUT" | grep -q "SELFTEST voice_cancel=True"
+
+      # Voice input (Ctrl+Shift+I): pinned model download, offline
+      # recognition, voiceModelsDir, and dictation into a pane (Linux runs
+      # the GUI part under Xvfb; all OSes check the native sherpa-onnx +
+      # OpenAL libraries load and recognize speech).
+      - name: Voice input
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            scripts/test-voice.sh
+          else
+            # Through the dotnet host (a console app), so stdout is a plain
+            # pipe on Windows too (the app itself is a WinExe).
+            wc() { dotnet bin/Release/net10.0/wraithcairn.dll "$@"; }
+            export WRAITHCAIRN_CONFIG_DIR="$RUNNER_TEMP/voice-cfg"
+            wc voice --download
+            curl -fsSL -o "$RUNNER_TEMP/jfk.wav" \
+              https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06/resolve/572aaf4e2e0c603c3fc2a574d096e755a178faa1/test_wavs/0.wav
+            text=$(wc voice --transcribe "$RUNNER_TEMP/jfk.wav" | tr -d '\r')
+            echo "transcribed: $text"
+            echo "$text" | grep -qi "what your country can do for you"
+            wc voice --devices || echo "(no microphone on this runner; capture library loaded)"
+          fi
 
       - name: Theme CLI (offline catalog)
         if: matrix.os == 'ubuntu-latest'
