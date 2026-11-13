@@ -64,6 +64,7 @@ jobs:
           echo "$OUTPUT" | grep -q "SELFTEST voice_retry=True try_again_offered=True"
           echo "$OUTPUT" | grep -q "SELFTEST voice_cancel=True"
           echo "$OUTPUT" | grep -q "SELFTEST shortcut_keys_not_leaked=True"
+          echo "$OUTPUT" | grep -q "SELFTEST split_focus=True"
 
       # Voice input (Ctrl+Shift+I): pinned model download, offline
       # recognition, voiceModelsDir, and dictation into a pane (Linux runs
