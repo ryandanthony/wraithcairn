@@ -89,6 +89,27 @@ jobs:
             wc voice --devices || echo "(no microphone on this runner; capture library loaded)"
           fi
 
+      # Same packaging as release.yml (single-file publish -> .app -> ad-hoc
+      # codesign), then speech recognition from inside the signed bundle:
+      # the self-extracted sherpa-onnx / onnxruntime / OpenAL dylibs must load
+      # under the bundle's signature, and Info.plist must carry the
+      # microphone usage string (macOS kills the app without it).
+      - name: Voice input from signed .app (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          dotnet publish -c Release -r osx-arm64 --self-contained true \
+            -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true \
+            -p:DebugType=none -o "$RUNNER_TEMP/macpub"
+          python3 scripts/make-macos-app.py "$RUNNER_TEMP/macpub" "$RUNNER_TEMP/app" 0.0.0
+          codesign --force --deep --sign - "$RUNNER_TEMP/app/wraithcairn.app"
+          codesign --verify --deep --strict "$RUNNER_TEMP/app/wraithcairn.app"
+          plutil -extract NSMicrophoneUsageDescription raw "$RUNNER_TEMP/app/wraithcairn.app/Contents/Info.plist"
+          exe="$RUNNER_TEMP/app/wraithcairn.app/Contents/MacOS/wraithcairn"
+          text=$(WRAITHCAIRN_CONFIG_DIR="$RUNNER_TEMP/voice-cfg" "$exe" voice --transcribe "$RUNNER_TEMP/jfk.wav")
+          echo "transcribed (app): $text"
+          echo "$text" | grep -qi "what your country can do for you"
+          WRAITHCAIRN_CONFIG_DIR="$RUNNER_TEMP/voice-cfg" "$exe" voice --devices || true
+
       - name: Theme CLI (offline catalog)
         if: matrix.os == 'ubuntu-latest'
         run: |
