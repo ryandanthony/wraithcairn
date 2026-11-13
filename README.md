@@ -97,7 +97,7 @@ Settings layer in this order (later wins):
 
 ### Updating
 
-`wraithcairn update` (or **View > Check for Updates...**) installs the
+`wraithcairn update` (or **Help > Check for Updates...**) installs the
 latest GitHub release for this OS/CPU, verified against `SHA256SUMS`, in
 place. `update --check` only reports (exit 10 = update available).
 
@@ -152,7 +152,7 @@ Saved 5 s after layout changes, on window close, and on exit/SIGTERM/SIGINT.
 | `Alt+1..9` | Switch to layout N |
 | `Ctrl+=` / `Ctrl+-` | Bigger / smaller text |
 
-All of these are also in the menu bar (Shell, Pane, Edit, View, Layouts).
+All of these are also in the menu bar (Shell, Edit, Layouts, View, Pane, Help).
 
 ## Pane header bar
 

@@ -24,7 +24,7 @@ curl -fsSL https://ryandanthony.github.io/wraithcairn/install | bash
 irm https://ryandanthony.github.io/wraithcairn/install.ps1 | iex
 ```
 
-To update later, run `wraithcairn update` or use **View → Check for
+To update later, run `wraithcairn update` or use **Help → Check for
 Updates…** (see [Updating](#updating)); running the same command again
 works too. Both scripts pick the build for your
 OS and CPU, download it from
@@ -183,7 +183,7 @@ wraithcairn update --check   # just report; exit code 10 = update available
 wraithcairn update --force   # reinstall the latest release
 ```
 
-Or open **View → Check for Updates…**: it shows your version and the
+Or open **Help → Check for Updates…**: it shows your version and the
 latest one, links the release notes, and **Update Now** installs it.
 **Restart Now** then saves your layouts and reopens wraithcairn on the new
 version.

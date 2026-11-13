@@ -6,7 +6,7 @@ title: Keyboard Shortcuts
 # Keyboard Shortcuts
 
 Every shortcut below is also available from the menu bar (**Shell**,
-**Pane**, **Edit**, **View**, **Layouts**).
+**Edit**, **Layouts**, **View**, **Pane**, **Help**).
 
 | Shortcut | Action |
 |---|---|
