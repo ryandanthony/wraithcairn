@@ -261,7 +261,12 @@ public sealed partial class MainWindow
             await Task.Delay(400);
             string typed = string.Concat(s_voiceTyped);
             string screen = TryReadScreenText(pane, out string text) ? text : string.Empty;
-            bool onScreen = typed.Length > 0 && screen.Contains(typed.Trim()[..Math.Min(20, typed.Trim().Length)], StringComparison.Ordinal);
+            // Compare without whitespace: in a narrow window (CI's Xvfb) the
+            // prompt plus phrase wraps, splitting it across screen rows.
+            static string Squash(string s) => new(s.Where(c => !char.IsWhiteSpace(c)).ToArray());
+            string typedSquashed = Squash(typed);
+            bool onScreen = typedSquashed.Length > 0
+                && Squash(screen).Contains(typedSquashed[..Math.Min(30, typedSquashed.Length)], StringComparison.Ordinal);
             bool expected = typed.Length > 10;
             bool notRun = info.RunningCommand is null && info.LastExitCode is null or 0
                 && !screen.Contains("command not found", StringComparison.OrdinalIgnoreCase)
