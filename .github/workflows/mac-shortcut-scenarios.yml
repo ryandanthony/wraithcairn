@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       versions:
-        description: "Space-separated release tags (default: v0.2.7 and latest)"
+        description: "Space-separated release tags, latest last (default: latest release)"
         required: false
   workflow_run:
     workflows: [Release]
@@ -41,8 +41,7 @@ jobs:
         run: |
           tags="${{ inputs.versions }}"
           [ -n "$tags" ] || tags="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName -q .tagName)"
-          # Manual runs also compare against v0.2.7 (first release with voice).
-          [ "${{ github.event_name }}" = workflow_dispatch ] && [ -z "${{ inputs.versions }}" ] && tags="v0.2.7 $tags"
+          # Compare releases with a manual run, e.g. versions="v0.2.7 v0.2.13" (latest last).
           echo "TAGS=$tags" >> "$GITHUB_ENV"
           for t in $tags; do
             mkdir -p "rel/$t"
