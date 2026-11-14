@@ -89,6 +89,24 @@ jobs:
             wc voice --devices || echo "(no microphone on this runner; capture library loaded)"
           fi
 
+      # Windows: the GUI dictation selftest (WAV as the microphone): words
+      # reach the prompt live, corrections leave nothing behind, no Enter.
+      - name: Voice dictation in a pane (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: bash
+        run: |
+          export WRAITHCAIRN_CONFIG_DIR="$RUNNER_TEMP/voice-cfg"
+          echo '{ "useGhosttyConfig": false, "showSplash": false }' > "$WRAITHCAIRN_CONFIG_DIR/config.json"
+          export WRAITHCAIRN_VOICE_SELFTEST_MODEL="$WRAITHCAIRN_CONFIG_DIR/models/sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06"
+          export WRAITHCAIRN_VOICE_SELFTEST_WAV="$RUNNER_TEMP/jfk.wav"
+          dotnet bin/Release/net10.0/wraithcairn.dll --selftest > "$RUNNER_TEMP/st.txt" 2>&1 &
+          pid=$!
+          for i in $(seq 1 240); do kill -0 $pid 2>/dev/null || break; sleep 1; done
+          kill $pid 2>/dev/null || true
+          grep "SELFTEST voice" "$RUNNER_TEMP/st.txt"
+          grep -q "SELFTEST voice_live_edits=True" "$RUNNER_TEMP/st.txt"
+          grep -q "SELFTEST voice_dictate=True.*live_before_final=True edits_clean=True" "$RUNNER_TEMP/st.txt"
+
       # Same packaging as release.yml (single-file publish -> .app -> ad-hoc
       # codesign), then speech recognition from inside the signed bundle:
       # the self-extracted sherpa-onnx / onnxruntime / OpenAL dylibs must load
@@ -128,7 +146,7 @@ jobs:
           grep -q "^PROBE ctrl+shift+i .*voice_toggled=True" "$RUNNER_TEMP/probe.txt"
           grep -q "^PROBE cmd+shift+i .*voice_toggled=True" "$RUNNER_TEMP/probe.txt"
           for how in pid hid hid-cmd; do
-            grep -q "^PROBE cg-$how shift+i .*listening=True dictated=True stopped=True" "$RUNNER_TEMP/probe.txt"
+            grep -q "^PROBE cg-$how shift+i .*listening=True dictated=True live_before_final=True stopped=True" "$RUNNER_TEMP/probe.txt"
           done
 
       - name: Theme CLI (offline catalog)

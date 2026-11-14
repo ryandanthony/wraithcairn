@@ -90,6 +90,7 @@ public sealed partial class MainWindow
             int seenBefore = s_shortcutSeen.Count;
             int togglesBefore = s_voiceToggles;
             s_voiceTyped.Clear();
+            s_voiceLiveSeen = false;
             nint src = MacNative.CGEventSourceCreate(1);
             async Task ChordAsync()
             {
@@ -117,11 +118,13 @@ public sealed partial class MainWindow
             await Task.Delay(800);
             bool listening = s_voice is not null;
             bool typed = false;
+            bool liveBeforeFinal = false;
             if (canDictate && listening)
             {
                 for (int i = 0; i < 150 && s_voiceTyped.Count == 0; i++)
                 {
                     await Task.Delay(100);
+                    liveBeforeFinal |= s_voiceTyped.Count == 0 && s_voiceLiveSeen;
                 }
 
                 typed = string.Concat(s_voiceTyped).Contains("country", StringComparison.OrdinalIgnoreCase);
@@ -139,7 +142,7 @@ public sealed partial class MainWindow
 
             string seen = s_shortcutSeen.Count > seenBefore ? string.Join(",", s_shortcutSeen.Skip(seenBefore)) : "(none)";
             Console.WriteLine($"PROBE cg-{how} shift+i seen={seen} voice_toggled={s_voiceToggles > togglesBefore} "
-                + (canDictate ? $"listening={listening} dictated={typed} stopped={s_voice is null} typed=\"{string.Concat(s_voiceTyped)}\"" : "dictation=skipped"));
+                + (canDictate ? $"listening={listening} dictated={typed} live_before_final={liveBeforeFinal} stopped={s_voice is null} typed=\"{string.Concat(s_voiceTyped)}\"" : "dictation=skipped"));
             foreach (Avalonia.Controls.Window owned in OwnedWindows.ToArray())
             {
                 owned.Close();
