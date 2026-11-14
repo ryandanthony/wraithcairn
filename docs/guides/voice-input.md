@@ -141,3 +141,26 @@ The model loads the first time you dictate (about 2 seconds, about 190
 MB of RAM). It stays loaded for 5 minutes after you stop, so starting
 again is instant, and then it is freed. Speech you start while it is still
 loading is buffered, not lost.
+
+## If the Shortcut Does Nothing
+
+If **Pane → Voice Input** works but `Ctrl+Shift+I` does nothing, start
+wraithcairn with tracing on and press the shortcut once:
+
+```bash
+# macOS
+WRAITHCAIRN_TRACE=1 /Applications/wraithcairn.app/Contents/MacOS/wraithcairn
+# Linux
+WRAITHCAIRN_TRACE=1 wraithcairn
+```
+
+- **No `TRACE key I` line:** the key never reached wraithcairn. Another
+  app or a system shortcut took it first. On macOS, check **System
+  Settings → Keyboard → Keyboard Shortcuts** and any hotkey or window
+  manager apps (Raycast, Alfred, BetterTouchTool, Rectangle, Karabiner).
+  On macOS, `Cmd+Shift+I` does the same thing and may be free.
+- **`TRACE key I mods=Control, Shift` but no `TRACE voice toggle` line:**
+  wraithcairn saw the key but did not act on it. That is a bug; please
+  report it with the trace lines.
+- **`TRACE voice toggle` then nothing in the pane:** the shortcut worked.
+  Check the pane header for the red mic, and the microphone permission.
