@@ -20,7 +20,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: mac-shortcut-scenarios
+  group: mac-shortcut-scenarios-${{ github.event_name }}
   cancel-in-progress: true
 
 jobs:
