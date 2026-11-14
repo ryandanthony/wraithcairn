@@ -1,0 +1,91 @@
+name: macOS shortcut scenarios
+
+# Real released wraithcairn.app on a macOS runner, driven from OUTSIDE the
+# app (scripts/macos-drive.swift: CGEvents through the window server, like
+# a keyboard and mouse). Each scenario checks what a user would see:
+# whether Ctrl+Shift+I started dictation (trace + what reached the pane),
+# and any extra windows that appeared (first-run model download dialog).
+
+on:
+  workflow_dispatch:
+    inputs:
+      versions:
+        description: "Space-separated release tags (default: v0.2.7 and latest)"
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  scenarios:
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: [model-installed, first-run-no-model, restored-split-layout, cmd-shift]
+    steps:
+      - uses: actions/checkout@v7
+      - name: Download releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tags="${{ inputs.versions }}"
+          [ -n "$tags" ] || tags="v0.2.7 $(gh release view --repo "$GITHUB_REPOSITORY" --json tagName -q .tagName)"
+          echo "TAGS=$tags" >> "$GITHUB_ENV"
+          for t in $tags; do
+            mkdir -p "rel/$t"
+            gh release download "$t" --repo "$GITHUB_REPOSITORY" --pattern '*-osx-arm64.zip' --dir "rel/$t"
+            ditto -x -k rel/$t/*.zip "rel/$t"
+            ls "rel/$t"
+          done
+          curl -fsSL -o "$RUNNER_TEMP/jfk.wav" \
+            https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06/resolve/572aaf4e2e0c603c3fc2a574d096e755a178faa1/test_wavs/0.wav
+          swiftc -O scripts/macos-drive.swift -o "$RUNNER_TEMP/drive"
+
+      - name: Run scenario ${{ matrix.scenario }}
+        run: |
+          drive="$RUNNER_TEMP/drive"
+          scenario="${{ matrix.scenario }}"
+          for t in $TAGS; do
+            echo "::group::$t $scenario"
+            exe="$PWD/rel/$t/wraithcairn.app/Contents/MacOS/wraithcairn"
+            cfg="$RUNNER_TEMP/cfg-$t"; rm -rf "$cfg"; mkdir -p "$cfg"
+            export WRAITHCAIRN_CONFIG_DIR="$cfg"
+            echo '{ "useGhosttyConfig": false, "showSplash": false, "voiceIdleStopSeconds": 0 }' > "$cfg/config.json"
+            if [ "$scenario" != first-run-no-model ]; then "$exe" voice --download | tail -1; fi
+            if [ "$scenario" = restored-split-layout ]; then
+              pane() { printf '{ "id": "%s", "title": null, "profileId": null, "workingDirectory": null, "transportId": "pty", "transportProfileId": null, "split": null, "startup": null }' "$1"; }
+              cat > "$cfg/workspace.json" <<EOF
+          { "formatVersion": 1, "selectedWindowId": "window-1", "windows": [ {
+            "id": "window-1", "title": "t", "selectedTabId": "tab-2", "widthPixels": 1200, "heightPixels": 800,
+            "isMaximized": false, "tabsInTitleBar": false,
+            "tabs": [
+              { "id": "tab-1", "profileId": "default", "title": "one", "workingDirectory": null, "transportId": "pty", "transportProfileId": null, "renderMode": "Default", "rootPane": $(pane p1) },
+              { "id": "tab-2", "profileId": "default", "title": "two", "workingDirectory": null, "transportId": "pty", "transportProfileId": null, "renderMode": "Default",
+                "rootPane": { "id": "p2", "title": null, "profileId": null, "workingDirectory": null, "transportId": null, "transportProfileId": null,
+                  "split": { "orientation": "Vertical", "ratio": 0.5, "firstPane": $(pane p3), "secondPane": $(pane p4) } } } ] } ] }
+          EOF
+            fi
+            out="$RUNNER_TEMP/pane-$t.txt"; rm -f "$out"
+            WRAITHCAIRN_TRACE=1 WRAITHCAIRN_VOICE_TEST_WAV="$RUNNER_TEMP/jfk.wav" "$exe" > "$RUNNER_TEMP/app-$t.log" 2>&1 &
+            pid=$!
+            sleep 12
+            "$drive" windows $pid
+            "$drive" click $pid
+            sleep 1
+            "$drive" keys "text:stty raw -echo; cat > $out" return sleep:1.5
+            if [ "$scenario" = cmd-shift ]; then chordk=cmd+shift+i; else chordk=ctrl+shift+i; fi
+            "$drive" keys $chordk sleep:4
+            echo "-- windows after first $chordk"; "$drive" windows $pid
+            "$drive" keys sleep:7 $chordk sleep:3
+            # Second try, as a user would after nothing seemed to happen.
+            "$drive" keys $chordk sleep:6 $chordk sleep:3
+            "$drive" keys ctrl+c sleep:1
+            echo "-- trace"
+            grep -E "TRACE (key I|voice)|VOICE" "$RUNNER_TEMP/app-$t.log" | head -20 || true
+            echo "-- pane received: $(od -c "$out" 2>/dev/null | head -5 | tr -s ' ')"
+            if grep -qi "country" "$out" 2>/dev/null; then echo "RESULT $t $scenario: DICTATED"; else echo "RESULT $t $scenario: NOTHING TYPED"; fi
+            kill $pid 2>/dev/null || true
+            sleep 2
+            echo "::endgroup::"
+          done
