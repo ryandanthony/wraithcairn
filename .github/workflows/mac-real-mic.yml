@@ -12,15 +12,25 @@ on:
       version:
         description: "Release tag (default: latest)"
         required: false
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
 
 permissions:
   contents: read
 
+concurrency:
+  group: mac-real-mic-${{ github.event_name }}
+  cancel-in-progress: true
+
 jobs:
   real-mic:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
       - name: Virtual audio device + release
         env:
           GH_TOKEN: ${{ github.token }}
