@@ -31,6 +31,7 @@ jobs:
       fail-fast: false
       matrix:
         scenario: [model-installed, first-run-no-model, restored-split-layout, cmd-shift]
+        arch: [arm64, x64]
     steps:
       - uses: actions/checkout@v7
         with:
@@ -45,21 +46,24 @@ jobs:
           echo "TAGS=$tags" >> "$GITHUB_ENV"
           for t in $tags; do
             mkdir -p "rel/$t"
-            gh release download "$t" --repo "$GITHUB_REPOSITORY" --pattern '*-osx-arm64.zip' --dir "rel/$t"
+            gh release download "$t" --repo "$GITHUB_REPOSITORY" --pattern "*-osx-${{ matrix.arch }}.zip" --dir "rel/$t"
             ditto -x -k rel/$t/*.zip "rel/$t"
             ls "rel/$t"
           done
           curl -fsSL -o "$RUNNER_TEMP/jfk.wav" \
             https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06/resolve/572aaf4e2e0c603c3fc2a574d096e755a178faa1/test_wavs/0.wav
           swiftc -O scripts/macos-drive.swift -o "$RUNNER_TEMP/drive"
+          # x64 builds run under Rosetta 2 on the Apple Silicon runner.
+          if [ "${{ matrix.arch }}" = x64 ]; then softwareupdate --install-rosetta --agree-to-license >/dev/null 2>&1 || true; fi
 
-      - name: Run scenario ${{ matrix.scenario }}
+      - name: Run scenario ${{ matrix.scenario }} (${{ matrix.arch }})
         run: |
           drive="$RUNNER_TEMP/drive"
           scenario="${{ matrix.scenario }}"
           for t in $TAGS; do
             echo "::group::$t $scenario"
             exe="$PWD/rel/$t/wraithcairn.app/Contents/MacOS/wraithcairn"
+            echo "ARCH $(file -b "$exe" | cut -c1-60)"
             cfg="$RUNNER_TEMP/cfg-$t"; rm -rf "$cfg"; mkdir -p "$cfg"
             export WRAITHCAIRN_CONFIG_DIR="$cfg"
             echo '{ "useGhosttyConfig": false, "showSplash": false, "voiceIdleStopSeconds": 0 }' > "$cfg/config.json"
