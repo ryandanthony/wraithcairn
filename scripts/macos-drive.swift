@@ -4,6 +4,7 @@
 //   swift drive.swift keys SPEC...       e.g. "text:cat > /tmp/x" Return ctrl+shift+i ctrl+d cmd+shift+i
 //   swift drive.swift windows PID        list PID's on-screen windows (title, bounds)
 import AppKit
+import Carbon
 import CoreGraphics
 import Foundation
 
@@ -64,6 +65,22 @@ func windows(_ pid: Int32) -> [[String: Any]] {
 
 let args = Array(CommandLine.arguments.dropFirst())
 switch args.first {
+case "layout":
+    // Select (enabling first) a keyboard layout, e.g. com.apple.keylayout.Dvorak.
+    let id = args[1]
+    let filter = [kTISPropertyInputSourceID as String: id] as CFDictionary
+    guard let list = TISCreateInputSourceList(filter, true)?.takeRetainedValue() as? [TISInputSource], let s = list.first else {
+        print("DRIVE no input source \(id)"); exit(1)
+    }
+    TISEnableInputSource(s)
+    let rc = TISSelectInputSource(s)
+    usleep(500_000)
+    let cur = TISCopyCurrentKeyboardInputSource().takeRetainedValue()
+    let curId = Unmanaged<CFString>.fromOpaque(TISGetInputSourceProperty(cur, kTISPropertyInputSourceID)).takeUnretainedValue()
+    print("DRIVE layout select rc=\(rc) current=\(curId)")
+case "keycode":
+    // keycode CODE MODS...: raw virtual key code (physical position), e.g. 0x05 ctrl shift
+    chord(UInt16(args[1].dropFirst(2), radix: 16)!, Array(args.dropFirst(2)))
 case "windows":
     let pid = Int32(args[1])!
     for w in windows(pid) {

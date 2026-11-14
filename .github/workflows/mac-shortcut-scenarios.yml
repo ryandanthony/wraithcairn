@@ -30,7 +30,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        scenario: [model-installed, first-run-no-model, restored-split-layout, cmd-shift]
+        scenario: [model-installed, first-run-no-model, restored-split-layout, cmd-shift, dvorak]
         arch: [arm64, x64]
     steps:
       - uses: actions/checkout@v7
@@ -93,12 +93,20 @@ jobs:
             sleep 1
             "$drive" keys "text:stty raw -echo; cat > $out" return sleep:1.5
             if [ "$scenario" = cmd-shift ]; then chordk=cmd+shift+i; else chordk=ctrl+shift+i; fi
-            "$drive" keys $chordk sleep:4
+            if [ "$scenario" = dvorak ]; then
+              # Dvorak: the key that types "i" sits where QWERTY has "g" (keycode 0x05).
+              "$drive" layout com.apple.keylayout.Dvorak
+              press() { "$drive" keycode 0x05 ctrl shift; }
+            else
+              press() { "$drive" keys $chordk; }
+            fi
+            press; sleep 4
             echo "-- windows after first $chordk"; "$drive" windows $pid | tee "$RUNNER_TEMP/windows-$t.txt"
-            "$drive" keys sleep:7 $chordk sleep:3
+            sleep 7; press; sleep 3
             # Second try, as a user would after nothing seemed to happen.
-            "$drive" keys $chordk sleep:6 $chordk sleep:3
+            press; sleep 6; press; sleep 3
             "$drive" keys ctrl+c sleep:1
+            [ "$scenario" = dvorak ] && "$drive" layout com.apple.keylayout.US || true
             echo "-- trace"
             grep -E "TRACE (key I|voice)|VOICE" "$RUNNER_TEMP/app-$t.log" | head -20 || true
             echo "-- pane received: $(od -c "$out" 2>/dev/null | head -5 | tr -s ' ')"
