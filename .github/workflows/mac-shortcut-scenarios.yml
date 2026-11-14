@@ -84,7 +84,10 @@ jobs:
             out="$RUNNER_TEMP/pane-$t.txt"; rm -f "$out"
             WRAITHCAIRN_TRACE=1 WRAITHCAIRN_VOICE_TEST_WAV="$RUNNER_TEMP/jfk.wav" "$exe" > "$RUNNER_TEMP/app-$t.log" 2>&1 &
             pid=$!
-            sleep 12
+            # Wait for the window (first launch under Rosetta translates first).
+            for i in $(seq 1 60); do "$drive" windows $pid | grep -q "wraithcairn layer=0" && break; sleep 1; done
+            echo "window after ${i}s"
+            sleep 4
             "$drive" windows $pid
             "$drive" click $pid
             sleep 1
