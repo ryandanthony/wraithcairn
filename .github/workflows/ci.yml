@@ -89,6 +89,27 @@ jobs:
             wc voice --devices || echo "(no microphone on this runner; capture library loaded)"
           fi
 
+      # Linux, the way a user meets it: Ctrl+Shift+I typed with XTest into
+      # the app on its own X server, speech played into a PulseAudio null
+      # sink whose monitor is the microphone (real OpenAL capture). A raw
+      # logger in the pane timestamps every byte: words must arrive before
+      # the speech ends, nothing but text (no Enter, no escapes), and the
+      # mic indicator must come and go. Both voiceLiveTyping settings.
+      - name: Voice end to end (Linux, real keys + capture)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get install -y pulseaudio pulseaudio-utils python3-pil xvfb libxtst6 >/dev/null
+          pulseaudio --start --exit-idle-time=-1
+          model="$(find "$RUNNER_TEMP" -maxdepth 6 -type d -name 'sherpa-onnx-streaming-zipformer-en-kroko-*' -path '*/speech/*' | head -1)"
+          wav="$(find "$RUNNER_TEMP" -maxdepth 3 -name jfk.wav | head -1)"
+          [ -n "$model" ] && [ -n "$wav" ] || { echo "model/wav from the Voice input step not found"; exit 1; }
+          for live in true false; do
+            out=$(E2E_LIVE=$live timeout 200 scripts/e2e-voice.sh bin/Release/net10.0/wraithcairn "$model" "$wav" :97 2>&1) || true
+            echo "$out"
+            echo "$out" | grep -q "E2E live_typing=.* result=PASS"
+            echo "$out" | grep -q "E2E indicator=PASS"
+          done
+
       # Windows: the GUI dictation selftest (WAV as the microphone): words
       # reach the prompt live, corrections leave nothing behind, no Enter.
       - name: Voice dictation in a pane (Windows)

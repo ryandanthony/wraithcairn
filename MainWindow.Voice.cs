@@ -61,6 +61,8 @@ public sealed partial class MainWindow
     {
         target ??= ActiveTab()?.Active;
         s_voiceToggles++;
+        VoiceTrace($"toggle target={(target is null ? "null" : target.GetHashCode())} starting={s_voiceStarting} "
+            + $"current={(s_voice is null ? "none" : s_voice.Target.GetHashCode())}");
         if (target is null || s_voiceStarting)
         {
             return;
@@ -160,6 +162,7 @@ public sealed partial class MainWindow
         });
         session.Ended += reason => Dispatcher.UIThread.Post(() =>
         {
+            VoiceTrace($"ended reason={reason}");
             s_voiceLastEnd = state.StopReason ?? reason;
             if (ReferenceEquals(s_voice, state))
             {
@@ -169,6 +172,12 @@ public sealed partial class MainWindow
             if (_panes.TryGetValue(target, out PaneInfo? ended))
             {
                 ended.Header.SetVoice(null);
+                // Tests (scripts/e2e-voice.sh): the window as the app drew it
+                // once dictation ended. X server captures can lag frames.
+                if (Environment.GetEnvironmentVariable("WRAITHCAIRN_VOICE_SNAPSHOT") is { Length: > 0 } snap)
+                {
+                    DispatcherTimer.RunOnce(() => SnapshotWindow(snap), TimeSpan.FromSeconds(1));
+                }
             }
 
             session.Dispose();
@@ -218,6 +227,14 @@ public sealed partial class MainWindow
         return true;
     }
 
+    private static void VoiceTrace(string message)
+    {
+        if (Environment.GetEnvironmentVariable("WRAITHCAIRN_TRACE") == "1")
+        {
+            Console.WriteLine($"TRACE voice {message}");
+        }
+    }
+
     /// <summary>Stops the current dictation (any pane, any window). Null reason = quiet.</summary>
     private void StopVoiceInput(string? reason)
     {
@@ -227,6 +244,7 @@ public sealed partial class MainWindow
         }
 
         state.StopReason ??= reason;
+        VoiceTrace($"stop reason={reason}");
         if (state.Owner._panes.TryGetValue(state.Target, out PaneInfo? info))
         {
             info.Header.SetVoice("finishing\u2026");
