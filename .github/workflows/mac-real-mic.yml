@@ -1,0 +1,94 @@
+name: macOS voice with a real input device
+
+# Released wraithcairn.app on a macOS runner, end to end the way a user
+# meets it: Ctrl+Shift+I from a separate process (CGEvents), speech played
+# with afplay into the BlackHole virtual audio device, captured by the app
+# from BlackHole through CoreAudio/OpenAL (no test hooks). A raw logger in
+# the pane timestamps every byte: words must arrive before the speech ends.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release tag (default: latest)"
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  real-mic:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Virtual audio device + release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          brew install --cask blackhole-2ch >/dev/null 2>&1 || brew install blackhole-2ch
+          brew install switchaudio-osx >/dev/null
+          sudo killall coreaudiod || true
+          sleep 5
+          SwitchAudioSource -a
+          t="${{ inputs.version }}"; [ -n "$t" ] || t=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName -q .tagName)
+          echo "TAG=$t" >> "$GITHUB_ENV"
+          gh release download "$t" --repo "$GITHUB_REPOSITORY" --pattern '*-osx-arm64.zip' --dir rel
+          ditto -x -k rel/*.zip rel
+          curl -fsSL -o "$RUNNER_TEMP/jfk.wav" \
+            https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06/resolve/572aaf4e2e0c603c3fc2a574d096e755a178faa1/test_wavs/0.wav
+          swiftc -O scripts/macos-drive.swift -o "$RUNNER_TEMP/drive"
+
+      - name: Dictate through BlackHole
+        run: |
+          exe="$PWD/rel/wraithcairn.app/Contents/MacOS/wraithcairn"
+          drive="$RUNNER_TEMP/drive"
+          cfg="$RUNNER_TEMP/cfg"; mkdir -p "$cfg"; export WRAITHCAIRN_CONFIG_DIR="$cfg"
+          echo '{ "useGhosttyConfig": false, "showSplash": false, "voiceIdleStopSeconds": 0, "voiceInputDevice": "BlackHole" }' > "$cfg/config.json"
+          "$exe" voice --download | tail -1
+          echo "-- capture devices seen by wraithcairn"; "$exe" voice --devices || true
+          # The same device through the CLI first: proves capture works at all.
+          SwitchAudioSource -t output -s "BlackHole 2ch"
+          ( sleep 1.5; afplay "$RUNNER_TEMP/jfk.wav" ) &
+          echo "-- voice --listen 8 (CLI, BlackHole): $("$exe" voice --listen 8 2>&1 | tail -2 | tr '\n' ' ')"
+          wait
+
+          cat > "$RUNNER_TEMP/log.py" <<'EOF'
+          import os, select, sys, termios, time, tty
+          fd = sys.stdin.fileno(); old = termios.tcgetattr(fd); tty.setraw(fd)
+          out = open(sys.argv[1], "w", buffering=1); end = time.time() + float(sys.argv[2])
+          try:
+              while time.time() < end:
+                  r, _, _ = select.select([fd], [], [], 0.2)
+                  if r:
+                      out.write(f"{time.time():.3f} {os.read(fd, 4096)!r}\n")
+          finally:
+              termios.tcsetattr(fd, termios.TCSADRAIN, old)
+          EOF
+          WRAITHCAIRN_TRACE=1 "$exe" > "$RUNNER_TEMP/app.log" 2>&1 &
+          pid=$!
+          for i in $(seq 1 60); do "$drive" windows $pid | grep -q "wraithcairn layer=0" && break; sleep 1; done
+          sleep 4
+          "$drive" click $pid; sleep 1
+          "$drive" keys "text:python3 $RUNNER_TEMP/log.py $RUNNER_TEMP/bytes.txt 40" return sleep:1.5
+          "$drive" keys ctrl+shift+i sleep:4
+          t_play=$(python3 -c 'import time; print(time.time())')
+          afplay "$RUNNER_TEMP/jfk.wav"
+          t_end=$(python3 -c 'import time; print(time.time())')
+          sleep 3
+          "$drive" keys ctrl+shift+i sleep:30
+          kill $pid || true
+          grep -E "TRACE (key I|voice)|VOICE|rror" "$RUNNER_TEMP/app.log" | head -20 || true
+          echo "-- bytes"; cat "$RUNNER_TEMP/bytes.txt" || true
+          python3 - "$RUNNER_TEMP/bytes.txt" "$t_play" "$t_end" <<'EOF'
+          import ast, sys
+          rows = [(float(l.split(" ", 1)[0]), ast.literal_eval(l.split(" ", 1)[1])) for l in open(sys.argv[1])] if open(sys.argv[1]).read() else []
+          t_play, t_end = float(sys.argv[2]), float(sys.argv[3])
+          data = b"".join(b for _, b in rows)
+          before = b"".join(b for t, b in rows if t < t_end).replace(b"\x7f", b"")
+          first = round(rows[0][0] - t_play, 2) if rows else None
+          print(f"speech_len={t_end - t_play:.2f}s first_text_after={first}s chars_before_speech_end={len(before)}")
+          print(f"enter_sent={b'\\r' in data or b'\\n' in data} final={data.decode('utf-8','replace')!r}")
+          ok = len(before) >= 10 and b"country" in data.lower() and b"\r" not in data and b"\n" not in data
+          print(f"MAC_REAL_MIC {'PASS' if ok else 'FAIL'}")
+          sys.exit(0 if ok else 1)
+          EOF
