@@ -104,9 +104,9 @@ jobs:
               "$drive" click $pid; sleep 0.5
               "$drive" keys cmd+shift+v sleep:1 cmd+shift+z sleep:0.5 cmd+shift+z sleep:1
               "$drive" keys ctrl+c sleep:1
-              got=$(cat "$out" 2>/dev/null || true)
+              got=$(tr -d '\003' < "$out" 2>/dev/null || true)   # drop our own Ctrl+C
               echo "aliases: leaves after Cmd+Shift+O=$after_split after Cmd+Shift+W=$after_close pane_got=$(printf '%s' "$got" | od -An -c | tr -s ' ')"
-              if [ "$after_split" = 2 ] && [ "$after_close" = 1 ] && [ "$got" = "wc-paste-marker" ]; then result=DICTATED; else result=FAILED; fi
+              if [ "$after_split" = 2 ] && [ "$after_close" = 1 ] && [ "$got" = "wc-paste-marker" ]; then result=WORKS; else result=FAILED; fi
               echo "RESULT $t $scenario: $result (alias effects)"
               echo "$t $result" >> "$RUNNER_TEMP/results.txt"
               kill $pid 2>/dev/null || true; sleep 2; echo "::endgroup::"; continue
@@ -142,5 +142,5 @@ jobs:
           done
           # The newest release must work in every scenario.
           latest=${TAGS##* }
-          want=DICTATED; [ "$scenario" = first-run-no-model ] && want="DOWNLOAD DIALOG"
+          want=DICTATED; [ "$scenario" = first-run-no-model ] && want="DOWNLOAD DIALOG"; [ "$scenario" = aliases ] && want=WORKS
           grep -q "^$latest $want\$" "$RUNNER_TEMP/results.txt" || { echo "$latest $scenario: expected $want"; exit 1; }
