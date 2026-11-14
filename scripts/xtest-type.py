@@ -26,7 +26,7 @@ dpy = x11.XOpenDisplay(None)
 if not dpy:
     sys.exit("cannot open display")
 
-MODS = {"shift": "Shift_L", "ctrl": "Control_L", "alt": "Alt_L"}
+MODS = {"shift": "Shift_L", "ctrl": "Control_L", "alt": "Alt_L", "super": "Super_L"}
 NAMES = {"\\": "backslash", "[": "bracketleft", "]": "bracketright", "`": "grave", " ": "space", "#": "numbersign", "-": "minus", "/": "slash", ".": "period", ">": "greater",
          "|": "bar", "$": "dollar", "_": "underscore", "'": "apostrophe", '"': "quotedbl", "=": "equal",
          ";": "semicolon", ":": "colon", ",": "comma", "<": "less", "!": "exclam", "&": "ampersand",

@@ -30,7 +30,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        scenario: [model-installed, first-run-no-model, restored-split-layout, cmd-shift, dvorak]
+        scenario: [model-installed, first-run-no-model, restored-split-layout, cmd-shift, dvorak, aliases]
         arch: [arm64, x64]
     steps:
       - uses: actions/checkout@v7
@@ -92,6 +92,25 @@ jobs:
             "$drive" click $pid
             sleep 1
             "$drive" keys "text:stty raw -echo; cat > $out" return sleep:1.5
+            if [ "$scenario" = aliases ]; then
+              # Cmd+Shift+letter = Ctrl+Shift+letter, with effects a user sees:
+              # O splits, W closes, V pastes once; nothing leaks to the program.
+              leaves() { python3 scripts/workspace-leaves.py "$cfg/workspace.json"; }
+              printf 'wc-paste-marker' | pbcopy
+              "$drive" keys cmd+shift+o sleep:7    # layout autosaves 5 s after changes
+              after_split=$(leaves)
+              "$drive" keys cmd+shift+w sleep:7
+              after_close=$(leaves)
+              "$drive" click $pid; sleep 0.5
+              "$drive" keys cmd+shift+v sleep:1 cmd+shift+z sleep:0.5 cmd+shift+z sleep:1
+              "$drive" keys ctrl+c sleep:1
+              got=$(cat "$out" 2>/dev/null || true)
+              echo "aliases: leaves after Cmd+Shift+O=$after_split after Cmd+Shift+W=$after_close pane_got=$(printf '%s' "$got" | od -An -c | tr -s ' ')"
+              if [ "$after_split" = 2 ] && [ "$after_close" = 1 ] && [ "$got" = "wc-paste-marker" ]; then result=DICTATED; else result=FAILED; fi
+              echo "RESULT $t $scenario: $result (alias effects)"
+              echo "$t $result" >> "$RUNNER_TEMP/results.txt"
+              kill $pid 2>/dev/null || true; sleep 2; echo "::endgroup::"; continue
+            fi
             if [ "$scenario" = cmd-shift ]; then chordk=cmd+shift+i; else chordk=ctrl+shift+i; fi
             if [ "$scenario" = dvorak ]; then
               # Dvorak: the key that types "i" sits where QWERTY has "g" (keycode 0x05).
