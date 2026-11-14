@@ -12,12 +12,20 @@ on:
       versions:
         description: "Space-separated release tags (default: v0.2.7 and latest)"
         required: false
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
 
 permissions:
   contents: read
 
+concurrency:
+  group: mac-shortcut-scenarios
+  cancel-in-progress: true
+
 jobs:
   scenarios:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: macos-latest
     strategy:
       fail-fast: false
@@ -25,12 +33,16 @@ jobs:
         scenario: [model-installed, first-run-no-model, restored-split-layout, cmd-shift]
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
       - name: Download releases
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           tags="${{ inputs.versions }}"
-          [ -n "$tags" ] || tags="v0.2.7 $(gh release view --repo "$GITHUB_REPOSITORY" --json tagName -q .tagName)"
+          [ -n "$tags" ] || tags="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName -q .tagName)"
+          # Manual runs also compare against v0.2.7 (first release with voice).
+          [ "${{ github.event_name }}" = workflow_dispatch ] && [ -z "${{ inputs.versions }}" ] && tags="v0.2.7 $tags"
           echo "TAGS=$tags" >> "$GITHUB_ENV"
           for t in $tags; do
             mkdir -p "rel/$t"
@@ -76,7 +88,7 @@ jobs:
             "$drive" keys "text:stty raw -echo; cat > $out" return sleep:1.5
             if [ "$scenario" = cmd-shift ]; then chordk=cmd+shift+i; else chordk=ctrl+shift+i; fi
             "$drive" keys $chordk sleep:4
-            echo "-- windows after first $chordk"; "$drive" windows $pid
+            echo "-- windows after first $chordk"; "$drive" windows $pid | tee "$RUNNER_TEMP/windows-$t.txt"
             "$drive" keys sleep:7 $chordk sleep:3
             # Second try, as a user would after nothing seemed to happen.
             "$drive" keys $chordk sleep:6 $chordk sleep:3
@@ -84,8 +96,18 @@ jobs:
             echo "-- trace"
             grep -E "TRACE (key I|voice)|VOICE" "$RUNNER_TEMP/app-$t.log" | head -20 || true
             echo "-- pane received: $(od -c "$out" 2>/dev/null | head -5 | tr -s ' ')"
-            if grep -qi "country" "$out" 2>/dev/null; then echo "RESULT $t $scenario: DICTATED"; else echo "RESULT $t $scenario: NOTHING TYPED"; fi
+            if grep -qi "country" "$out" 2>/dev/null; then result=DICTATED; else result="NOTHING TYPED"; fi
+            if [ "$scenario" = first-run-no-model ]; then
+              # First use must offer the model download, in front of the window.
+              if grep -q "name=Voice Input" "$RUNNER_TEMP/windows-$t.txt"; then result="DOWNLOAD DIALOG"; fi
+            fi
+            echo "RESULT $t $scenario: $result"
+            echo "$t $result" >> "$RUNNER_TEMP/results.txt"
             kill $pid 2>/dev/null || true
             sleep 2
             echo "::endgroup::"
           done
+          # The newest release must work in every scenario.
+          latest=${TAGS##* }
+          want=DICTATED; [ "$scenario" = first-run-no-model ] && want="DOWNLOAD DIALOG"
+          grep -q "^$latest $want\$" "$RUNNER_TEMP/results.txt" || { echo "$latest $scenario: expected $want"; exit 1; }
