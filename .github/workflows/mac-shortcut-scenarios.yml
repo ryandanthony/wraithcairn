@@ -101,12 +101,19 @@ jobs:
               after_split=$(leaves)
               "$drive" keys cmd+shift+w sleep:7
               after_close=$(leaves)
+              # Option+Shift+O types "Ø" on a Mac layout: the split-left chords
+              # must still be recognised as O (Cmd and Ctrl variants).
+              "$drive" keys cmd+alt+shift+o sleep:7
+              after_cmd_alt=$(leaves)
+              "$drive" keys ctrl+alt+shift+o sleep:7
+              after_ctrl_alt=$(leaves)
+              "$drive" keys cmd+shift+w sleep:1 cmd+shift+w sleep:7
               "$drive" click $pid; sleep 0.5
               "$drive" keys cmd+shift+v sleep:1 cmd+shift+z sleep:0.5 cmd+shift+z sleep:1
               "$drive" keys ctrl+c sleep:1
               got=$(tr -d '\003' < "$out" 2>/dev/null || true)   # drop our own Ctrl+C
-              echo "aliases: leaves after Cmd+Shift+O=$after_split after Cmd+Shift+W=$after_close pane_got=$(printf '%s' "$got" | od -An -c | tr -s ' ')"
-              if [ "$after_split" = 2 ] && [ "$after_close" = 1 ] && [ "$got" = "wc-paste-marker" ]; then result=WORKS; else result=FAILED; fi
+              echo "aliases: leaves after Cmd+Shift+O=$after_split after Cmd+Shift+W=$after_close after Cmd+Alt+Shift+O=$after_cmd_alt after Ctrl+Alt+Shift+O=$after_ctrl_alt pane_got=$(printf '%s' "$got" | od -An -c | tr -s ' ')"
+              if [ "$after_split" = 2 ] && [ "$after_close" = 1 ] && [ "$after_cmd_alt" = 2 ] && [ "$after_ctrl_alt" = 3 ] && [ "$got" = "wc-paste-marker" ]; then result=WORKS; else result=FAILED; fi
               echo "RESULT $t $scenario: $result (alias effects)"
               echo "$t $result" >> "$RUNNER_TEMP/results.txt"
               kill $pid 2>/dev/null || true; sleep 2; echo "::endgroup::"; continue
