@@ -109,6 +109,11 @@ jobs:
             echo "$out" | grep -q "E2E live_typing=.* result=PASS"
             echo "$out" | grep -q "E2E indicator=PASS"
           done
+          # The Cmd+Shift alias is macOS-only: Super+Shift+letter must do
+          # nothing on Linux (Ctrl+Shift+O as the positive control).
+          out=$(timeout 90 scripts/test-super-shift.sh bin/Release/net10.0/wraithcairn :96 2>&1) || true
+          echo "$out"
+          echo "$out" | grep -q "RESULT super_shift_inert=PASS"
 
       # Windows: the GUI dictation selftest (WAV as the microphone): words
       # reach the prompt live, corrections leave nothing behind, no Enter.
